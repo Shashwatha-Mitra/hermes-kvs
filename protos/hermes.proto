@@ -1,9 +1,48 @@
-message Empty {}
-
 message Data {
-    optional bytes chunk = 1;
+    required bytes chunk = 1;
+}
+
+message ReadRequest {
+    required bytes key = 1;
+}
+
+message WriteRequest {
+    required bytes key = 1;
+    required bytes value = 2;
+}
+
+message ReadResponse {
+    required bytes value = 1;
+}
+
+message Empty {
+}
+
+message InvalidateRequest {
+    required bytes key = 1;
+    required bytes value = 2;
+    required Timestamp ts = 3;
+    required int32 epoch_id = 4;
+
+    message Timestamp {
+        required int32 local_ts = 1;
+        required int32 node_id = 2;
+    }
+}
+
+message InvalidateResponse {
+    required bool accept = 1;
+}
+
+message ValidateRequest {
+    required bytes key = 1;
 }
 
 service Hermes {
-    rpc Get(Empty) returns (stream Data) {}
+    // Client-facing RPCs
+    rpc Read(ReadRequest) returns (ReadResponse) {}
+    rpc Write(WriteRequest) returns (Empty) {}
+
+    rpc Invalidate(InvalidateRequest) returns (InvalidateResponse) {}
+    rpc Validate(ValidateRequest) returns (Empty) {}
 }

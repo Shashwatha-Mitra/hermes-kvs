@@ -53,7 +53,7 @@ target_link_libraries(hermes_grpc_proto
   ${_PROTOBUF_LIBPROTOBUF})
 
 add_executable(server server.cpp)
-add_executable(client client.cpp)
+# add_executable(client client.cpp)
 
 # message("${absl::log_initialize}")
 target_link_libraries(server 
@@ -64,8 +64,8 @@ target_link_libraries(server
     gRPC::grpc++
     protobuf    
 )
-target_link_libraries(client 
-    hermes_grpc_proto
-    absl::flags absl::flags_parse 
-    gRPC::grpc++
-    protobuf) 
+# target_link_libraries(client 
+#     hermes_grpc_proto
+#     absl::flags absl::flags_parse 
+#     gRPC::grpc++
+#     protobuf) 

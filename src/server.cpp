@@ -1,66 +1,65 @@
-#include "hermes.grpc.pb.h"
+#include "server.h"
 
-#include <vector>
-#include <string>
-#include <memory>
-#include <grpcpp/grpcpp.h>
-#include <absl/flags/flag.h>
-#include <absl/flags/parse.h>
-#include <thread>
-#include <cstdint>
+std::unique_ptr<Hermes::Stub> create_stub(const std::string &addr) {
+    auto channel_ptr = grpc::CreateChannel(addr, grpc::InsecureChannelCredentials());
+    return std::make_unique<Hermes::Stub>(channel_ptr);
+}
 
-class HermesServiceImpl: public Hermes::Service {
-private:
-    std::vector<uint32_t> vec;
-    std::string* data_str;
-    uint64_t num_total_bytes;
+HermesServiceImpl::HermesServiceImpl(uint32_t id): server_id(id) {
 
-public:
-    HermesServiceImpl(uint64_t num_total_bytes): num_total_bytes(num_total_bytes) {
-        int size = 2048/sizeof(uint32_t);
-        vec.resize(size);
-        for (uint32_t i=0; i<vec.size(); i++) {
-            vec[i] = i;
-        }
-        data_str = new std::string(reinterpret_cast<const char*>(vec.data()), 2048);
-        std::cout << data_str->size() << "\n";
-    }
+}
 
-    grpc::Status Get(grpc::ServerContext* context, const Empty* request, 
-            grpc::ServerWriter<Data>* writer) override {
-        std::cout << std::this_thread::get_id() << ": Received Get request\n";
-        uint64_t i = 0ll;
-        Data d;
-        d.set_allocated_chunk(data_str);
-        for (; i<num_total_bytes; i+=2048) {
-            writer->Write(d);
-        }
-        data_str = d.release_chunk();
-        Data last;
-        grpc::WriteOptions options;
-        writer->WriteLast(last, options);
-        std::cout << "Wrote " << i << " chunks:\n";
-
+grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx, 
+        ReadRequest *req, ReadResponse *resp) {
+    auto key = req->key();
+    if (key_value_map.find(key) == key_value_map.end()) {
         return grpc::Status::OK;
     }
 
-    virtual ~HermesServiceImpl(){}
-};
+    auto it = key_value_map.find(key);
+    const auto hermes_val = it->second.get();
+    std::unique_lock lock {hermes_val->stall_mutex};
+    // Wait till the key is in VALID state
+    hermes_val->stall_cv.wait(lock, hermes_val->st == VALID);
+    resp->set_value(hermes_val->value);
+    return grpc::Status::OK;
+}
 
-ABSL_FLAG(uint64_t, num_gigs, 1, "Size of dataset in GiB");
+grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *req, Empty *resp) {
+    auto key = req->key();
+    HermesValue *hermes_val;
+    if (key_value_map.find(key) == key_value_map.end()) {
+        hermes_val = new HermesValue(req->value(), server_id);
+    } else {
+        hermes_val = key_value_map.find(key)->second.get();
+    }
 
-int main(int argc, char** argv) {
-    absl::ParseCommandLine(argc, argv);
-    uint64_t num_gigs = absl::GetFlag(FLAGS_num_gigs);
-    uint64_t total = num_gigs * 1ll * 1<<30;
-    std::string server_address("localhost:50052");
-    std::cout << "Total bytes: " << total << "\n";
-    HermesServiceImpl service(total);
+    std::unique_lock<std::mutex> lock(hermes_val->stall_mutex);
+    // Wait till the key is in VALID state
+    hermes_val->stall_cv.wait(lock, hermes_val->st == VALID);
+    hermes_val->increment_ts(server_id);
+    hermes_val->st = WRITE;
 
-    grpc::ServerBuilder builder;
-    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-    builder.RegisterService(&service);
-    std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-    std::cout << "Server listening on " << server_address << std::endl;
-    server->Wait();
+    // Send invalid messages to all nodes
+    invalidate_value(hermes_val, key);
+}
+
+void HermesServiceImpl::invalidate_value(HermesValue *val, std::string &key) {
+    for (auto& stub: active_server_stubs) {
+        // Send invalidates
+        grpc::ClientContext ctx;
+        InvalidateRequest req;
+        InvalidateResponse resp;
+        req.set_allocated_key(&key);
+        // TODO: Fix this memory leak
+        req.set_allocated_ts(&(val->timestamp.get_grpc_timestamp()));
+        req.set_value(val->value);
+        req.set_epoch_id(epoch);
+
+        InvalidateResponse resp;
+        auto status = stub->Invalidate(&ctx, req, &resp);
+    }
+    // Wait for response
+
+    // Retry
 }

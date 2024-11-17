@@ -1,0 +1,59 @@
+#include "hermes.grpc.pb.h"
+#include "data.h"
+
+#include <vector>
+#include <string>
+#include <memory>
+#include <thread>
+#include <cstdint>
+#include <unordered_map>
+#include <grpcpp/grpcpp.h>
+#include <absl/flags/flag.h>
+#include <absl/flags/parse.h>
+
+class HermesServiceImpl: public Hermes::Service {
+private:
+    std::vector<std::unique_ptr<Hermes::Stub>> active_server_stubs;
+
+    std::vector<std::string> active_servers;
+
+    uint32_t epoch;
+
+    uint32_t server_id;
+
+    std::unordered_map<std::string, std::unique_ptr<HermesValue>> key_value_map;
+
+    void invalidate_value(HermesValue *val, std::string &key);
+
+public:
+    HermesServiceImpl(uint32_t id);
+
+    grpc::Status Read(grpc::ServerContext *ctx, ReadRequest *req, ReadResponse *resp);
+
+    grpc::Status Write(grpc::ServerContext *ctx, WriteRequest *req, Empty *resp);
+
+    grpc::Status Invalidate(grpc::ServerContext *ctx, InvalidateRequest *req, InvalidateResponse *resp);
+
+    grpc::Status Validate(grpc::ServerContext *ctx, ValidateRequest *req, Empty *resp);
+
+    virtual ~HermesServiceImpl(){}
+};
+
+ABSL_FLAG(uint32_t, id, 1, "Server id");
+ABSL_FLAG(uint32_t, port, 50050, "Port");
+
+int main(int argc, char** argv) {
+    absl::ParseCommandLine(argc, argv);
+    uint32_t id = absl::GetFlag(FLAGS_id);
+    uint32_t port = absl::GetFlag(FLAGS_port);
+    std::string server_address("localhost:" + std::to_string(port));
+
+    HermesServiceImpl service(id);
+
+    grpc::ServerBuilder builder;
+    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    builder.RegisterService(&service);
+    std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+    std::cout << "Server listening on " << server_address << std::endl;
+    server->Wait();
+}
