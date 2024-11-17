@@ -1,0 +1,9 @@
+message Empty {}
+
+message Data {
+    optional bytes chunk = 1;
+}
+
+service Hermes {
+    rpc Get(Empty) returns (stream Data) {}
+}
