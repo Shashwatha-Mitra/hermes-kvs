@@ -17,6 +17,8 @@ private:
 
     std::vector<std::string> active_servers;
 
+    const uint32_t mlt = 1; // Message loss timeout in seconds
+
     uint32_t epoch;
 
     uint32_t server_id;

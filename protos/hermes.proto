@@ -18,16 +18,16 @@ message ReadResponse {
 message Empty {
 }
 
+message HermesTimestamp {
+    required int32 local_ts = 1;
+    required int32 node_id = 2;
+}
+
 message InvalidateRequest {
     required bytes key = 1;
     required bytes value = 2;
-    required Timestamp ts = 3;
+    required HermesTimestamp ts = 3;
     required int32 epoch_id = 4;
-
-    message Timestamp {
-        required int32 local_ts = 1;
-        required int32 node_id = 2;
-    }
 }
 
 message InvalidateResponse {
@@ -36,6 +36,7 @@ message InvalidateResponse {
 
 message ValidateRequest {
     required bytes key = 1;
+    required HermesTimestamp ts = 2;
 }
 
 service Hermes {
