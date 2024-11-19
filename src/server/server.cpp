@@ -6,7 +6,22 @@ std::unique_ptr<Hermes::Stub> create_stub(const std::string &addr) {
     return std::make_unique<Hermes::Stub>(channel_ptr);
 }
 
-HermesServiceImpl::HermesServiceImpl(uint32_t id): server_id(id) {
+HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir): server_id(id) {
+    std::string log_file_name = log_dir + "spdlog_server_" + std::to_string(id) + ".log";
+
+    // Initialize the logger and set the flush rate
+    spdlog::flush_every(std::chrono::milliseconds(1));
+    logger = spdlog::basic_logger_mt("server_logger", log_file_name);
+
+    // Set logging level
+    logger->set_level(spdlog::level::debug);
+    logger->flush_on(spdlog::level::debug);
+    SPDLOG_LOGGER_TRACE(logger , "Trace level logging.. {} ,{}", 1, 3.23);
+    SPDLOG_LOGGER_DEBUG(logger , "Debug level logging.. {} ,{}", 1, 3.23);
+    SPDLOG_LOGGER_INFO(logger , "Info level logging.. {} ,{}", 1, 3.23);
+    SPDLOG_LOGGER_WARN(logger , "Warn level logging.. {} ,{}", 1, 3.23);
+    SPDLOG_LOGGER_ERROR(logger , "Error level logging.. {} ,{}", 1, 3.23);
+    SPDLOG_LOGGER_CRITICAL(logger , "Critical level logging.. {} ,{}", 1, 3.23);
 }
 
 grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx, 
@@ -18,9 +33,7 @@ grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx,
 
     auto it = key_value_map.find(key);
     const auto hermes_val = it->second.get();
-    std::unique_lock lock {hermes_val->stall_mutex};
-    // Wait till the key is in VALID state
-    hermes_val->stall_cv.wait(lock, hermes_val->st == VALID);
+    hermes_val->wait_till_valid();
     resp->set_value(hermes_val->value);
     return grpc::Status::OK;
 }
@@ -33,20 +46,42 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *re
     } else {
         hermes_val = key_value_map.find(key)->second.get();
     }
+    
+    // Stall writes till we are sure that the key is valid
+    hermes_val->wait_till_valid();
 
-    {
-        // State transition to WRITE
-        std::unique_lock<std::mutex> lock(hermes_val->stall_mutex);
-        // Wait till the key is in VALID state
-        hermes_val->stall_cv.wait(lock, hermes_val->st == VALID);
-        hermes_val->increment_ts(server_id);
-        hermes_val->st = WRITE;
+    // If key is available, transition to WRITE state
+    hermes_val->coord_valid_to_write_transition();
+
+    // Check if the write was interrupted by a higher priority write
+    if (!hermes_val->is_valid()) {
+        
+        // Value is in transient state waiting for ACKs to arrive
+        hermes_val->coord_write_to_trans_trasition();
+        hermes_val->wait_for_acks();
+        hermes_val->coord_trans_to_invalid_transition();
+
+        // From here we need to wait till the other coordinator sends the updated value
+        // with the correct timestamp. We wait till the state becomes valid since we are 
+        // currently in an INVALID state. Once done, we can return the value and the
+        // client sees the latest updated value based on the timestamp ordering
+        hermes_val->wait_till_valid();
+
+    } else {
+
+        // Wait till all the acks for the invalidate arrives 
+        hermes_val->wait_for_acks();
+    
+        // Value was accepted by all the nodes, we can trasition safely back to valid state
+        // and propagate a VAL message to all the nodes. Wait till we get ACKs back (do we need this??)
+        hermes_val->coord_write_to_valid_transition();
+        hermes_val->wait_for_acks();
+
     }
-
-    // Send invalid messages to all nodes
-    invalidate_value(hermes_val, key);
+    return grpc::Status::OK;
 }
 
+// Invalidates the key in all other servers by sending INV (key, val, ts, epoch)
 void HermesServiceImpl::invalidate_value(HermesValue *val, std::string &key) {
     using InvalidateRespReader = typename std::unique_ptr<grpc::ClientAsyncResponseReader<InvalidateResponse>>;
     
@@ -98,8 +133,10 @@ void HermesServiceImpl::invalidate_value(HermesValue *val, std::string &key) {
     }
     cq.Shutdown();
     alarm.Cancel();
+    // Call stub->validate
 }
 
+// Invalidate handling via gRPC
 grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, InvalidateRequest *req, InvalidateResponse *resp) {
     if (req->epoch_id() != epoch) {
         // Epoch id doesnt match. Reject request
@@ -132,6 +169,7 @@ grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, InvalidateR
     return grpc::Status::OK;
 }
 
+// Called by co-ordinator to validate the current key.
 grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, ValidateRequest *req, Empty *resp) {
     HermesValue* hermes_val = key_value_map.find(req->key())->second.get();
     {

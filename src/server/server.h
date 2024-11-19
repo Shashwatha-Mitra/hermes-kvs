@@ -1,3 +1,6 @@
+#pragma once
+#define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
+
 #include "hermes.grpc.pb.h"
 #include "data.h"
 
@@ -10,6 +13,9 @@
 #include <grpcpp/grpcpp.h>
 #include <absl/flags/flag.h>
 #include <absl/flags/parse.h>
+
+#include "spdlog/include/spdlog/spdlog.h"
+#include "spdlog/include/spdlog/sinks/basic_file_sink.h"
 
 class HermesServiceImpl: public Hermes::Service {
 private:
@@ -25,7 +31,11 @@ private:
 
     std::unordered_map<std::string, std::unique_ptr<HermesValue>> key_value_map;
 
+    std::unordered_map<std::string, bool> is_coord_for_key;
+
     void invalidate_value(HermesValue *val, std::string &key);
+
+    std::shared_ptr<spdlog::logger> logger;
 
 public:
     HermesServiceImpl(uint32_t id);
@@ -43,14 +53,16 @@ public:
 
 ABSL_FLAG(uint32_t, id, 1, "Server id");
 ABSL_FLAG(uint32_t, port, 50050, "Port");
+ABSL_FLAG(std::string, log_dir, "", "log directory");
 
 int main(int argc, char** argv) {
     absl::ParseCommandLine(argc, argv);
     uint32_t id = absl::GetFlag(FLAGS_id);
     uint32_t port = absl::GetFlag(FLAGS_port);
+    std::string log_dir = absl::GetFlag(FLAGS_log_dir);
     std::string server_address("localhost:" + std::to_string(port));
 
-    HermesServiceImpl service(id);
+    HermesServiceImpl service(id, log_dir);
 
     grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
