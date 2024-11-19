@@ -1,5 +1,5 @@
 #include "server.h"
-#include <alarm.h>
+#include <grpcpp/alarm.h>
 
 std::unique_ptr<Hermes::Stub> create_stub(const std::string &addr) {
     auto channel_ptr = grpc::CreateChannel(addr, grpc::InsecureChannelCredentials());
@@ -57,15 +57,19 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *re
     if (!hermes_val->is_valid()) {
         
         // Value is in transient state waiting for ACKs to arrive
-        hermes_val->coord_write_to_trans_trasition();
+        hermes_val->coord_write_to_trans_transition();
         hermes_val->wait_for_acks();
         hermes_val->coord_trans_to_invalid_transition();
 
+        // start timer..
         // From here we need to wait till the other coordinator sends the updated value
         // with the correct timestamp. We wait till the state becomes valid since we are 
         // currently in an INVALID state. Once done, we can return the value and the
         // client sees the latest updated value based on the timestamp ordering
         hermes_val->wait_till_valid();
+        // timer expires first or we get a validate rpc
+        // if timer expires first:
+        //      go to replay state 
 
     } else {
 
@@ -83,6 +87,16 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *re
 
 // Invalidates the key in all other servers by sending INV (key, val, ts, epoch)
 void HermesServiceImpl::invalidate_value(HermesValue *val, std::string &key) {
+    /**
+     * Functions to implement (in state.h):
+     * - broadcast_invalidate
+     * - broadcast_validate
+     * - wait_for_acks
+     * - go_to_retry
+     * - delete completion queue
+     * - acquire locks on active servers before broadcasting invalidates
+     * Add logs
+     */
     using InvalidateRespReader = typename std::unique_ptr<grpc::ClientAsyncResponseReader<InvalidateResponse>>;
     
     grpc::CompletionQueue cq;
@@ -96,6 +110,7 @@ void HermesServiceImpl::invalidate_value(HermesValue *val, std::string &key) {
     void *alarm_tag = reinterpret_cast<void*>(num_active_servers);
     alarm.Set(&cq, deadline, alarm_tag);
     int i = 0;
+    auto grpc_ts = val->timestamp.get_grpc_timestamp();
 
     for (auto& stub: active_server_stubs) {
         tags[i] = i;
@@ -104,8 +119,7 @@ void HermesServiceImpl::invalidate_value(HermesValue *val, std::string &key) {
         grpc::ClientContext ctx;
         InvalidateRequest req;
         req.set_allocated_key(&key);
-        // TODO: Fix this memory leak
-        req.set_allocated_ts(&(val->timestamp.get_grpc_timestamp()));
+        req.set_allocated_ts(&grpc_ts);
         req.set_value(val->value);
         req.set_epoch_id(epoch);
 

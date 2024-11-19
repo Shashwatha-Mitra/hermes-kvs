@@ -38,7 +38,7 @@ private:
     std::shared_ptr<spdlog::logger> logger;
 
 public:
-    HermesServiceImpl(uint32_t id);
+    HermesServiceImpl(uint32_t id, std::string &log_dir);
 
     grpc::Status Read(grpc::ServerContext *ctx, ReadRequest *req, ReadResponse *resp);
 

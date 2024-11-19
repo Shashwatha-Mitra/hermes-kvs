@@ -14,6 +14,8 @@ struct Timestamp {
     uint32_t logical_time;
     uint32_t node_id;
 
+    Timestamp() = default;
+
     Timestamp(HermesTimestamp ts) {
         this->logical_time = ts.local_ts();
         this->node_id = ts.node_id();
@@ -69,7 +71,7 @@ struct HermesValue {
         std::unique_lock<std::mutex> lock(stall_mutex);
 
         // Wait till the key is in VALID state
-        stall_cv.wait(lock, st == VALID);
+        stall_cv.wait(lock, [this]{return st == VALID;});
     }
 
     // Helper function waits for acks for the INV messages
@@ -78,7 +80,7 @@ struct HermesValue {
         return;
     }
     
-    void is_valid() {
+    bool is_valid() {
         return st == VALID;
     }
 
