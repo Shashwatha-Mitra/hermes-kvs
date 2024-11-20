@@ -19,9 +19,13 @@
 
 class HermesServiceImpl: public Hermes::Service {
 private:
+    using InvalidateRespReader = typename std::unique_ptr<grpc::ClientAsyncResponseReader<InvalidateResponse>>;
+
     std::vector<std::unique_ptr<Hermes::Stub>> active_server_stubs;
 
     std::vector<std::string> active_servers;
+
+    std::mutex server_state_mutex; // Mutex to lock server stubs and server names
 
     const uint32_t mlt = 1; // Message loss timeout in seconds
 
@@ -36,6 +40,12 @@ private:
     void invalidate_value(HermesValue *val, std::string &key);
 
     std::shared_ptr<spdlog::logger> logger;
+
+    void broadcast_invalidate(HermesValue *val, std::string &key, grpc::CompletionQueue &cq,
+        std::vector<InvalidateResponse> &responses, std::vector<grpc::Status> &status_list);
+
+    int receive_acks(grpc::CompletionQueue &cq, std::vector<InvalidateResponse> &responses, 
+        std::vector<grpc::Status> &status_list);
 
 public:
     HermesServiceImpl(uint32_t id, std::string &log_dir);

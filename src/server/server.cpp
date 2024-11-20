@@ -40,6 +40,7 @@ grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx,
 
 grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *req, Empty *resp) {
     auto key = req->key();
+    SPDLOG_LOGGER_INFO(logger, "Received write request");
     HermesValue *hermes_val;
     if (key_value_map.find(key) == key_value_map.end()) {
         hermes_val = new HermesValue(req->value(), server_id);
@@ -53,68 +54,96 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *re
     // If key is available, transition to WRITE state
     hermes_val->coord_valid_to_write_transition();
 
-    // Check if the write was interrupted by a higher priority write
-    if (!hermes_val->is_valid()) {
+    while (true) {
+        grpc::CompletionQueue broadcast_queue;
+        std::vector<InvalidateResponse> responses;
+        std::vector<grpc::Status> broadcast_status_list;
+        {
+            std::unique_lock<std::mutex> server_state_lock {server_state_mutex};
+            broadcast_invalidate(hermes_val, key, broadcast_queue, responses, broadcast_status_list);
+        }
+
+        // Check if the write was interrupted by a higher priority write
+        if (!hermes_val->is_valid()) {
+            SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC in the middle of write RPC");
+            // TODO(): Skip transient state and go to invalid state directly?
+            broadcast_queue.Shutdown();
+            // Value is in transient state waiting for ACKs to arrive
+            hermes_val->coord_write_to_trans_transition();
+            hermes_val->wait_for_acks();
+            hermes_val->coord_trans_to_invalid_transition();
+
+            // start timer..
+            // From here we need to wait till the other coordinator sends the updated value
+            // with the correct timestamp. We wait till the state becomes valid since we are 
+            // currently in an INVALID state. Once done, we can return the value and the
+            // client sees the latest updated value based on the timestamp ordering
+            hermes_val->wait_till_valid();
+            // timer expires first or we get a validate rpc
+            // if timer expires first:
+            //      go to replay state 
+
+        } else {
+            // Wait till all the acks for the invalidate arrives 
+            int acks_received = receive_acks(broadcast_queue, responses, broadcast_status_list);
         
-        // Value is in transient state waiting for ACKs to arrive
-        hermes_val->coord_write_to_trans_transition();
-        hermes_val->wait_for_acks();
-        hermes_val->coord_trans_to_invalid_transition();
-
-        // start timer..
-        // From here we need to wait till the other coordinator sends the updated value
-        // with the correct timestamp. We wait till the state becomes valid since we are 
-        // currently in an INVALID state. Once done, we can return the value and the
-        // client sees the latest updated value based on the timestamp ordering
-        hermes_val->wait_till_valid();
-        // timer expires first or we get a validate rpc
-        // if timer expires first:
-        //      go to replay state 
-
-    } else {
-
-        // Wait till all the acks for the invalidate arrives 
-        hermes_val->wait_for_acks();
-    
-        // Value was accepted by all the nodes, we can trasition safely back to valid state
-        // and propagate a VAL message to all the nodes. Wait till we get ACKs back (do we need this??)
-        hermes_val->coord_write_to_valid_transition();
-        hermes_val->wait_for_acks();
-
+            if (acks_received == responses.size()) {
+                // Value was accepted by all the nodes, we can trasition safely back to valid state
+                // and propagate a VAL message to all the nodes. Wait till we get ACKs back (do we need this??)
+                hermes_val->coord_write_to_valid_transition();
+                hermes_val->wait_for_acks();
+                break;
+            }
+        }
     }
     return grpc::Status::OK;
 }
 
-// Invalidates the key in all other servers by sending INV (key, val, ts, epoch)
-void HermesServiceImpl::invalidate_value(HermesValue *val, std::string &key) {
-    /**
-     * Functions to implement (in state.h):
-     * - broadcast_invalidate
-     * - broadcast_validate
-     * - wait_for_acks
-     * - go_to_retry
-     * - delete completion queue
-     * - acquire locks on active servers before broadcasting invalidates
-     * Add logs
-     */
-    using InvalidateRespReader = typename std::unique_ptr<grpc::ClientAsyncResponseReader<InvalidateResponse>>;
-    
-    grpc::CompletionQueue cq;
+int HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, std::vector<InvalidateResponse> &responses, 
+        std::vector<grpc::Status> &status_list) {
+    int acks_received = 0;
+    int num_servers, alarm_tag;
+    num_servers = alarm_tag = responses.size();
+    void* next_tag;
+    bool ok;
+    bool retry = false;
+    bool key_invalidated = false;
+    // TODO(): Check state
+    while (!cq.Next(&next_tag, &ok)) {
+        // TODO(): Check state
+        if (ok) {
+            if (*reinterpret_cast<int*>(next_tag) == alarm_tag) {
+                // MLT expired. Return from this function and keep retrying...
+                SPDLOG_LOGGER_INFO(logger, "Alarm expired while broadcasting");
+                break;
+            } else {
+                acks_received++;
+                if (acks_received == num_servers) {
+                    break;
+                }
+            }
+        }
+    }
+    cq.Shutdown();
+    SPDLOG_LOGGER_INFO(logger, "Received %d acks", acks_received);
+    return acks_received;
+}
+
+void HermesServiceImpl::broadcast_invalidate(HermesValue *val, std::string &key, grpc::CompletionQueue &cq,
+        std::vector<InvalidateResponse> &responses, std::vector<grpc::Status> &status_list) {   
+    SPDLOG_LOGGER_INFO(logger, "Broadcasting INVALIDATE RPCs");
     int num_active_servers = active_server_stubs.size();
-    std::vector<InvalidateRespReader> response_receivers;
-    std::vector<InvalidateResponse> responses (num_active_servers);
-    std::vector<grpc::Status> status(num_active_servers); 
-    std::vector<uint32_t> tags(num_active_servers);
+    responses.resize(num_active_servers);
+    status_list.resize(num_active_servers);
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(mlt);
+
     grpc::Alarm alarm;
-    void *alarm_tag = reinterpret_cast<void*>(num_active_servers);
-    alarm.Set(&cq, deadline, alarm_tag);
+    alarm.Set(&cq, deadline, reinterpret_cast<void*>(&num_active_servers));
+
     int i = 0;
     auto grpc_ts = val->timestamp.get_grpc_timestamp();
 
     for (auto& stub: active_server_stubs) {
-        tags[i] = i;
-
         // Send invalidates
         grpc::ClientContext ctx;
         InvalidateRequest req;
@@ -125,29 +154,10 @@ void HermesServiceImpl::invalidate_value(HermesValue *val, std::string &key) {
 
         InvalidateResponse resp;
         auto receiver = stub->AsyncInvalidate(&ctx, req, &cq);
-        receiver->Finish(&responses[i], &status[i], (void*)i);
+        receiver->Finish(&responses[i], &status_list[i], (void*)i);
+        i++;
     }
-    // Wait for response and retry
-    void* next_tag;
-    bool ok;
-    std::vector<int> acked_servers;
-    bool retry = false;
-    bool key_invalidated = false;
-    // TODO(): Check state
-    while (!cq.Next(&next_tag, &ok)) {
-        // TODO(): Check state
-        if (ok) {
-            if (next_tag == alarm_tag) {
-                // MLT expired. Keep retrying...
-                retry = true;
-            } else {
-                acked_servers.push_back(*reinterpret_cast<int*>(next_tag));
-            }
-        }
-    }
-    cq.Shutdown();
-    alarm.Cancel();
-    // Call stub->validate
+    SPDLOG_LOGGER_DEBUG(logger, "Broadcasted Invalidate RPCs");
 }
 
 // Invalidate handling via gRPC
