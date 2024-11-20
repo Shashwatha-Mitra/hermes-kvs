@@ -29,6 +29,8 @@ private:
 
     const uint32_t mlt = 1; // Message loss timeout in seconds
 
+    const uint32_t replay_timeout = 1; // Time to wait before calling replay
+
     uint32_t epoch;
 
     uint32_t server_id;

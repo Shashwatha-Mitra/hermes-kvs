@@ -43,16 +43,16 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *re
     SPDLOG_LOGGER_INFO(logger, "Received write request");
     HermesValue *hermes_val;
     if (key_value_map.find(key) == key_value_map.end()) {
+        SPDLOG_LOGGER_DEBUG (logger, "Key not found!");
         hermes_val = new HermesValue(req->value(), server_id);
     } else {
+        SPDLOG_LOGGER_DEBUG (logger, "Key found!");
         hermes_val = key_value_map.find(key)->second.get();
     }
-    
+
     // Stall writes till we are sure that the key is valid
     hermes_val->wait_till_valid();
-
-    // If key is available, transition to WRITE state
-    hermes_val->coord_valid_to_write_transition();
+    bool replay = false;
 
     while (true) {
         grpc::CompletionQueue broadcast_queue;
@@ -61,28 +61,48 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *re
         {
             std::unique_lock<std::mutex> server_state_lock {server_state_mutex};
             broadcast_invalidate(hermes_val, key, broadcast_queue, responses, broadcast_status_list);
+            
+            if (replay) {
+                hermes_val->coord_replay_to_write_transition();
+            } else {
+                // TODO: Debug this!!
+                // Compare and Swap operations usually should succeed. But since we are using enums as is
+                // we could face failures. If we are continually succeeding, we can drop this check and 
+                // make coord_valid_to_write_transition() inline void to make this cleaner. 
+                if (hermes_val->coord_valid_to_write_transition()) {
+                    SPDLOG_LOGGER_INFO(logger, "Compare and Swap succeeded. Value in WRITE state");
+                } else {
+                    SPDLOG_LOGGER_CRITICAL(logger, "Compare and Swap failed!!. Value still in VALID state.");
+                }
+            }
         }
 
         // Check if the write was interrupted by a higher priority write
         if (!hermes_val->is_valid()) {
             SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC in the middle of write RPC");
-            // TODO(): Skip transient state and go to invalid state directly?
             broadcast_queue.Shutdown();
-            // Value is in transient state waiting for ACKs to arrive
-            hermes_val->coord_write_to_trans_transition();
-            hermes_val->wait_for_acks();
-            hermes_val->coord_trans_to_invalid_transition();
 
-            // start timer..
+            // Value is in invalid state. We do not wait for ACKs for the previous INV RPC.
+            hermes_val->coord_write_to_invalid_transition();
+
             // From here we need to wait till the other coordinator sends the updated value
             // with the correct timestamp. We wait till the state becomes valid since we are 
             // currently in an INVALID state. Once done, we can return the value and the
             // client sees the latest updated value based on the timestamp ordering
-            hermes_val->wait_till_valid();
-            // timer expires first or we get a validate rpc
-            // if timer expires first:
-            //      go to replay state 
-
+            hermes_val->wait_till_valid_timeout(replay_timeout);
+            
+            if (!hermes_val->is_valid()) {
+                // We did not receive a VAL message from the conflicting write within the timeout
+                // Since we are a follower now, we make the follower INVALID to REPLAY transition
+                hermes_val->fol_invalid_to_replay_transition();
+                replay = true;
+            } else {
+                // We received a VAL message from the conflicting write. We can safely return.
+                // Insert key into the KV-store
+                hermes_val->increment_ts();
+                key_value_map[key] = hermes_val;
+                break;
+            }
         } else {
             // Wait till all the acks for the invalidate arrives 
             int acks_received = receive_acks(broadcast_queue, responses, broadcast_status_list);
@@ -91,7 +111,8 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *re
                 // Value was accepted by all the nodes, we can trasition safely back to valid state
                 // and propagate a VAL message to all the nodes. Wait till we get ACKs back (do we need this??)
                 hermes_val->coord_write_to_valid_transition();
-                hermes_val->wait_for_acks();
+                key_value_map[key] = hermes_val;
+                hermes_val->increment_ts();
                 break;
             }
         }
@@ -167,6 +188,8 @@ grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, InvalidateR
         resp->set_accept(false);
         return grpc::Status::OK;
     }
+    auto value = req->value();
+    auto ts = req->ts();
     HermesValue* hermes_val {nullptr};
     bool new_key = false;
     
@@ -177,34 +200,30 @@ grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, InvalidateR
     } else {
         hermes_val = key_value_map.find(req->key())->second.get();
     }
-    {
-        // State transition to Invalid
-        std::unique_lock<std::mutex> lock(hermes_val->stall_mutex);
-        if (!new_key && Timestamp(req->ts()) < hermes_val->timestamp) {
-            // Timestamp is lower than local timestamp. Reject
-            resp->set_accept(false);
-            return grpc::Status::OK;
-        }
-        hermes_val->st = INVALID;
-        hermes_val->value = req->value();
-        hermes_val->timestamp = Timestamp(req->ts());
+
+    // Reject any key that has lower timestamp
+    if (!new_key && hermes_val->is_lower(ts)) {
+        // Timestamp is lower than local timestamp. Reject
+        resp->set_accept(false);
+        return grpc::Status::OK;
     }
+    hermes_val->fol_valid_to_invalid_transition(value, ts);
     resp->set_accept(true);
     return grpc::Status::OK;
 }
 
 // Called by co-ordinator to validate the current key.
 grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, ValidateRequest *req, Empty *resp) {
+    auto key = req->key();
+    auto ts = req->ts();
     HermesValue* hermes_val = key_value_map.find(req->key())->second.get();
-    {
-        // State transition to Valid
-        std::unique_lock<std::mutex> lock(hermes_val->stall_mutex);
-        if (Timestamp(req->ts()) != hermes_val->timestamp) {
-            // Timestamp is not equal to local timestamp, which means a request with higher timestamp must 
-            // have been accepted. Ignore
-            return grpc::Status::OK;
-        }
-        hermes_val->st = VALID;
+    if (hermes_val->not_equal(ts)) {
+        // Timestamp is not equal to local timestamp, which means a request with higher timestamp must 
+        // have been accepted. Ignore
+        return grpc::Status::OK;
     }
+    hermes_val->fol_invalid_to_valid_transition();
+    hermes_val->increment_ts();
+    key_value_map[key] = hermes_val;
     return grpc::Status::OK;
 }
