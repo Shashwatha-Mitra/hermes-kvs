@@ -1,3 +1,5 @@
+syntax = "proto2";
+
 message Data {
     required bytes chunk = 1;
 }

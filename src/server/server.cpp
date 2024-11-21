@@ -6,7 +6,17 @@ std::unique_ptr<Hermes::Stub> create_stub(const std::string &addr) {
     return std::make_unique<Hermes::Stub>(channel_ptr);
 }
 
-HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir): server_id(id) {
+HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir, 
+        const std::vector<std::string> &server_list,
+        uint32_t port)
+        : server_id(id) {
+    active_servers = std::move(server_list);
+    self_addr = "localhost:" + std::to_string(port);
+
+    for (auto server: active_servers) {
+        if (server == self_addr) continue;
+        active_server_stubs.push_back(create_stub(server));
+    }
     std::string log_file_name = log_dir + "spdlog_server_" + std::to_string(id) + ".log";
 
     // Initialize the logger and set the flush rate
@@ -25,7 +35,7 @@ HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir): server_
 }
 
 grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx, 
-        ReadRequest *req, ReadResponse *resp) {
+        const ReadRequest *req, ReadResponse *resp) {
     auto key = req->key();
     if (key_value_map.find(key) == key_value_map.end()) {
         return grpc::Status::OK;
@@ -38,7 +48,7 @@ grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx,
     return grpc::Status::OK;
 }
 
-grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *req, Empty *resp) {
+grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteRequest *req, Empty *resp) {
     auto key = req->key();
     SPDLOG_LOGGER_INFO(logger, "Received write request");
     HermesValue *hermes_val;
@@ -63,7 +73,7 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *re
             broadcast_invalidate(hermes_val, key, broadcast_queue, responses, broadcast_status_list);
             
             if (replay) {
-                hermes_val->coord_replay_to_write_transition();
+                hermes_val->fol_replay_to_write_transition();
             } else {
                 // TODO: Debug this!!
                 // Compare and Swap operations usually should succeed. But since we are using enums as is
@@ -99,8 +109,7 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *re
             } else {
                 // We received a VAL message from the conflicting write. We can safely return.
                 // Insert key into the KV-store
-                hermes_val->increment_ts();
-                key_value_map[key] = hermes_val;
+                hermes_val->increment_ts(server_id);
                 break;
             }
         } else {
@@ -111,8 +120,7 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, WriteRequest *re
                 // Value was accepted by all the nodes, we can trasition safely back to valid state
                 // and propagate a VAL message to all the nodes. Wait till we get ACKs back (do we need this??)
                 hermes_val->coord_write_to_valid_transition();
-                key_value_map[key] = hermes_val;
-                hermes_val->increment_ts();
+                hermes_val->increment_ts(server_id);
                 break;
             }
         }
@@ -182,7 +190,7 @@ void HermesServiceImpl::broadcast_invalidate(HermesValue *val, std::string &key,
 }
 
 // Invalidate handling via gRPC
-grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, InvalidateRequest *req, InvalidateResponse *resp) {
+grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, const InvalidateRequest *req, InvalidateResponse *resp) {
     if (req->epoch_id() != epoch) {
         // Epoch id doesnt match. Reject request
         resp->set_accept(false);
@@ -209,11 +217,13 @@ grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, InvalidateR
     }
     hermes_val->fol_valid_to_invalid_transition(value, ts);
     resp->set_accept(true);
+
+    // Go to replay state after timeout
     return grpc::Status::OK;
 }
 
 // Called by co-ordinator to validate the current key.
-grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, ValidateRequest *req, Empty *resp) {
+grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const ValidateRequest *req, Empty *resp) {
     auto key = req->key();
     auto ts = req->ts();
     HermesValue* hermes_val = key_value_map.find(req->key())->second.get();
@@ -223,7 +233,6 @@ grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, ValidateReque
         return grpc::Status::OK;
     }
     hermes_val->fol_invalid_to_valid_transition();
-    hermes_val->increment_ts();
-    key_value_map[key] = hermes_val;
+    hermes_val->increment_ts(server_id);
     return grpc::Status::OK;
 }

@@ -20,3 +20,6 @@ cd $BUILD_DIR
 cmake ..
 make -j 4
 cd $ROOT_DIR
+
+# Generate python grpc code
+python3 -m grpc_tools.protoc -I./protos --python_out=./src/client --pyi_out=./src/client --grpc_python_out=./src/client ./protos/hermes.proto

@@ -52,7 +52,7 @@ target_link_libraries(hermes_grpc_proto
   ${_GRPC_GRPCPP}
   ${_PROTOBUF_LIBPROTOBUF})
 
-add_executable(server server/server.cpp)
+add_executable(server server/server.cpp server/main.cpp)
 # add_executable(client client.cpp)
 
 # message("${absl::log_initialize}")

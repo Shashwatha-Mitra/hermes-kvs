@@ -2,7 +2,7 @@
 #define SPDLOG_ACTIVE_LEVEL SPDLOG_LEVEL_TRACE
 
 #include "hermes.grpc.pb.h"
-#include "data.h"
+#include "state.h"
 
 #include <vector>
 #include <string>
@@ -24,6 +24,8 @@ private:
     std::vector<std::unique_ptr<Hermes::Stub>> active_server_stubs;
 
     std::vector<std::string> active_servers;
+
+    std::string self_addr;
 
     std::mutex server_state_mutex; // Mutex to lock server stubs and server names
 
@@ -50,36 +52,36 @@ private:
         std::vector<grpc::Status> &status_list);
 
 public:
-    HermesServiceImpl(uint32_t id, std::string &log_dir);
+    HermesServiceImpl(uint32_t id, std::string &log_dir, const std::vector<std::string> &server_list, uint32_t port);
 
-    grpc::Status Read(grpc::ServerContext *ctx, ReadRequest *req, ReadResponse *resp);
+    grpc::Status Read(grpc::ServerContext *ctx, const ReadRequest *req, ReadResponse *resp) override;
 
-    grpc::Status Write(grpc::ServerContext *ctx, WriteRequest *req, Empty *resp);
+    grpc::Status Write(grpc::ServerContext *ctx, const WriteRequest *req, Empty *resp) override;
 
-    grpc::Status Invalidate(grpc::ServerContext *ctx, InvalidateRequest *req, InvalidateResponse *resp);
+    grpc::Status Invalidate(grpc::ServerContext *ctx, const InvalidateRequest *req, InvalidateResponse *resp) override;
 
-    grpc::Status Validate(grpc::ServerContext *ctx, ValidateRequest *req, Empty *resp);
+    grpc::Status Validate(grpc::ServerContext *ctx, const ValidateRequest *req, Empty *resp) override;
 
     virtual ~HermesServiceImpl(){}
 };
 
-ABSL_FLAG(uint32_t, id, 1, "Server id");
-ABSL_FLAG(uint32_t, port, 50050, "Port");
-ABSL_FLAG(std::string, log_dir, "", "log directory");
+// ABSL_FLAG(uint32_t, id, 1, "Server id");
+// ABSL_FLAG(uint32_t, port, 50050, "Port");
+// ABSL_FLAG(std::string, log_dir, "", "log directory");
 
-int main(int argc, char** argv) {
-    absl::ParseCommandLine(argc, argv);
-    uint32_t id = absl::GetFlag(FLAGS_id);
-    uint32_t port = absl::GetFlag(FLAGS_port);
-    std::string log_dir = absl::GetFlag(FLAGS_log_dir);
-    std::string server_address("localhost:" + std::to_string(port));
+// int main(int argc, char** argv) {
+//     absl::ParseCommandLine(argc, argv);
+//     uint32_t id = absl::GetFlag(FLAGS_id);
+//     uint32_t port = absl::GetFlag(FLAGS_port);
+//     std::string log_dir = absl::GetFlag(FLAGS_log_dir);
+//     std::string server_address("localhost:" + std::to_string(port));
 
-    HermesServiceImpl service(id, log_dir);
+//     HermesServiceImpl service(id, log_dir);
 
-    grpc::ServerBuilder builder;
-    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-    builder.RegisterService(&service);
-    std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-    std::cout << "Server listening on " << server_address << std::endl;
-    server->Wait();
-}
+//     grpc::ServerBuilder builder;
+//     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+//     builder.RegisterService(&service);
+//     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+//     std::cout << "Server listening on " << server_address << std::endl;
+//     server->Wait();
+// }

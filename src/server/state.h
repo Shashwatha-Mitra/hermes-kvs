@@ -81,7 +81,7 @@ struct HermesValue {
         std::unique_lock<std::mutex> lock(stall_mutex);
         
         // Wait till the key is in VALID state or timeout occurs
-        stall_cv.wait(lock, std::chrono::seconds(timeout), [this] {return is_valid();});
+        stall_cv.wait_for(lock, std::chrono::seconds(timeout), [this] {return is_valid();});
     }
 
     bool is_lower(HermesTimestamp ts) {
@@ -99,35 +99,42 @@ struct HermesValue {
     }
 
     inline bool coord_valid_to_write_transition() {
-        return st.compare_exchange_strong(VALID, WRITE);                
+        State expected = VALID;
+        return st.compare_exchange_strong(expected, WRITE);                
     }
 
     inline void coord_write_to_valid_transition() {
-        st.compare_exchange_strong(WRITE, VALID);
+        State expected = WRITE;
+        st.compare_exchange_strong(expected, VALID);
     }
     
     inline void coord_write_to_invalid_transition() {
-        st.compare_exchange_strong(WRITE, INVALID);
+        State expected = WRITE;
+        st.compare_exchange_strong(expected, INVALID);
     }
 
     inline void fol_invalid_to_replay_transition() {
-        st.compare_exchange_strong(INVALID, REPLAY);
+        State expected = INVALID;
+        st.compare_exchange_strong(expected, REPLAY);
     }
 
     inline void fol_replay_to_write_transition() {
-        st.compare_exchange_strong(REPLAY, WRITE);
+        State expected = REPLAY;
+        st.compare_exchange_strong(expected, WRITE);
     }
 
     // We check if the transition is possible before making it
     void fol_valid_to_invalid_transition(std::string value, HermesTimestamp ts) {
         std::unique_lock<std::mutex> lock(stall_mutex);
-        st.compare_exchange_strong(VALID, INVALID);
+        State expected = VALID;
+        st.compare_exchange_strong(expected, INVALID);
         this->value = value;
         this->timestamp = Timestamp(ts);
     }
 
     // We check if the transition is possible before making it 
     inline void fol_invalid_to_valid_transition() {
-        st.compare_exchange_strong(INVALID, VALID);
+        State expected = INVALID;
+        st.compare_exchange_strong(expected, VALID);
     }
 };
