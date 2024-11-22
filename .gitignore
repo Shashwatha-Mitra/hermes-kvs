@@ -2,3 +2,5 @@ build/
 .vscode/
 grpc/
 bin/
+src/client/hermes_pb2*
+src/client/__pycache__/
