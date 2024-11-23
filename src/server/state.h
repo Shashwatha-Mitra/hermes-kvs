@@ -17,6 +17,10 @@ struct Timestamp {
 
     Timestamp() = default;
 
+    // std::string to_string() {
+    //     std::string res = "Logical time: " + 
+    // }
+
     Timestamp(HermesTimestamp ts) {
         this->logical_time = ts.local_ts();
         this->node_id = ts.node_id();
@@ -84,6 +88,11 @@ struct HermesValue {
         stall_cv.wait_for(lock, std::chrono::seconds(timeout), [this] {return is_valid();});
     }
 
+    void update_value(const std::string &new_value) {
+        std::unique_lock<std::mutex> lock(stall_mutex);
+        value = new_value;
+    }
+
     bool is_lower(HermesTimestamp ts) {
         std::unique_lock<std::mutex> lock(stall_mutex);
         return Timestamp(ts) < timestamp;
@@ -96,6 +105,10 @@ struct HermesValue {
     
     inline bool is_valid() {
         return (st.load(std::memory_order_acquire) == VALID);
+    }
+
+    inline bool is_write() {
+        return (st.load(std::memory_order_acquire) == WRITE);
     }
 
     inline bool coord_valid_to_write_transition() {

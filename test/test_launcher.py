@@ -68,7 +68,7 @@ def launch_server(server_port, log_dir='', config_file=''):
         process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
         server_processes.append(process)
 
-def createService(config_file, master_port='', log_dir=''):
+def createService(config_file, log_dir=''):
     #TODO: start the manager before creating chains
 
     # if master_port:
@@ -230,7 +230,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--config-file', type=str, default='chain_config.txt', help='chain configuration file')
+    parser.add_argument('--config-file', type=str, default='test_config.txt', help='chain configuration file')
 #    parser.add_argument('--eeal-fname', type=str, default='real')
 #    parser.add_argument('--fake-fname', type=str, default='fake')
     parser.add_argument('--test-type', type=str, default='sanity', help='sanity, correctness, crash_consistency, perf, availability')

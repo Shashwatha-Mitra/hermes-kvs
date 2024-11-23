@@ -19,6 +19,8 @@ class HermesClient(Hermes):
         while (retries > 0):
             random_server = random.randint(0, len(self._server_list)-1)
             print(f"Querying server: {self._server_list[random_server]}")
+            random_server = random.randint(0, len(self._server_list)-1)
+            print(f"Querying server: {self._server_list[random_server]}")
             response = self._stubs[random_server].Read(ReadRequest(key=key))
             print(f"Value: {response.value}")
             val = response.value
