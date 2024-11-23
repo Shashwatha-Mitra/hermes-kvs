@@ -86,9 +86,9 @@ def createService(config_file, master_port='', log_dir=''):
     #     with open(log_file, 'w') as f:
     #         process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
     #         master_processes.append(process)
-
     time.sleep(5)
     servers = get_servers(config_file)
+    print (log_dir)
     for server in servers:
         launch_server(server, log_dir, config_file)
 
@@ -122,18 +122,16 @@ def terminateService():
 
 def startClients(args):
     for client_id in range(args.num_clients):
-        real_fname = args.real_fname + str(client_id) + '.csv'
-        fake_fname = args.fake_fname + str(client_id) + '.csv'
+#        real_fname = args.real_fname + str(client_id) + '.csv'
+#        fake_fname = args.fake_fname + str(client_id) + '.csv'
         
-        cmd = 'python3 client.py'
+        cmd = 'python3 simple_client.py'
         cmd += ' ' + f'--id={client_id}'
         cmd += ' ' + f'--config-file={args.config_file}'
-        cmd += ' ' + f'--real-fname={real_fname}'
-        cmd += ' ' + f'--fake-fname={fake_fname}'
-        cmd += ' ' + f'--test-type={args.test_type}'
-        cmd += ' ' + f'--top-dir={args.top_dir}'
+#        cmd += ' ' + f'--test-type={args.test_type}'
+#        cmd += ' ' + f'--top-dir={args.top_dir}'
         cmd += ' ' + f'--log-dir={args.log_dir}'
-        cmd += ' ' + f'--num-keys={args.num_keys}'
+#        cmd += ' ' + f'--num-keys={args.num_keys}'
         
         if (args.vk_ratio != 0):  
             cmd += ' ' + f'--vk_ratio={args.vk_ratio}'
@@ -233,8 +231,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--config-file', type=str, default='chain_config.txt', help='chain configuration file')
-    parser.add_argument('--real-fname', type=str, default='real')
-    parser.add_argument('--fake-fname', type=str, default='fake')
+#    parser.add_argument('--eeal-fname', type=str, default='real')
+#    parser.add_argument('--fake-fname', type=str, default='fake')
     parser.add_argument('--test-type', type=str, default='sanity', help='sanity, correctness, crash_consistency, perf, availability')
     parser.add_argument('--top-dir', type=str, default='../', help='path to top dir')
     parser.add_argument('--log-dir', type=str, default='out/', help='path to log dir')
@@ -269,7 +267,7 @@ if __name__ == "__main__":
             print(f"An unexpected exception occured while starting service: {e}")
             terminateTest()
             
-        time.sleep(30)
+ #       time.sleep(30)
 
     # startLoadMeasurement(log_dir, master_processes, server_processes)
 

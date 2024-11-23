@@ -37,6 +37,7 @@ HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir,
 grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx, 
         const ReadRequest *req, ReadResponse *resp) {
     auto key = req->key();
+    SPDLOG_LOGGER_INFO(logger, "Received Read Request!");
     if (key_value_map.find(key) == key_value_map.end()) {
         return grpc::Status::OK;
     }
