@@ -15,22 +15,27 @@ class HermesClient(Hermes):
 
     def get(self, key):
         retries = 5
-        val = ''
         while (retries > 0):
             random_server = random.randint(0, len(self._server_list)-1)
             print(f"Querying server: {self._server_list[random_server]}")
-            random_server = random.randint(0, len(self._server_list)-1)
-            print(f"Querying server: {self._server_list[random_server]}")
-            response = self._stubs[random_server].Read(ReadRequest(key=key))
-            print(f"Value: {response.value}")
-            val = response.value
-            retries -= 1
-        return val
+            try:
+                response = self._stubs[random_server].Read(ReadRequest(key=key))
+                print(f"Value: {response.value}")
+                return response.value
+            except Exception as e:
+                retries -= 1
+                if retries == 0:
+                    raise e
 
     def put(self, key, value):
         retries = 5
         while (retries > 0):
             random_server = random.randint(0, len(self._server_list)-1)
             print(f"Querying server: {self._server_list[random_server]}")
-            response = self._stubs[random_server].Write(WriteRequest(key=key, value=value))
-            retries -= 1
+            try:
+                response = self._stubs[random_server].Write(WriteRequest(key=key, value=value))
+                return
+            except Exception as e:
+                retries -= 1
+                if retries == 0:
+                    raise e
