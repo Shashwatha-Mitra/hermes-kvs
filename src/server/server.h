@@ -48,12 +48,12 @@ private:
 
     std::shared_ptr<spdlog::logger> logger;
 
-    void broadcast_invalidate(HermesValue *val, std::string &key, grpc::CompletionQueue &cq,
-        std::vector<InvalidateResponse> &responses);
+    void broadcast_invalidate(Timestamp &ts, const std::string &value, std::string &key, 
+        grpc::CompletionQueue &cq);
 
     void broadcast_validate(Timestamp ts, std::string key);
 
-    int receive_acks(grpc::CompletionQueue &cq, std::vector<InvalidateResponse> &responses);
+    std::pair<int, int> receive_acks(grpc::CompletionQueue &cq);
 
 public:
     HermesServiceImpl(uint32_t id, std::string &log_dir, const std::vector<std::string> &server_list, uint32_t port);

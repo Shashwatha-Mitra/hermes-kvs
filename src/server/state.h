@@ -64,12 +64,6 @@ struct HermesValue {
         timestamp.logical_time = 0;
         st.store(VALID, std::memory_order_release);
     }
-
-    void increment_ts(uint32_t node_id) {
-        std::unique_lock<std::mutex> lock(stall_mutex);
-        timestamp.logical_time++;
-        timestamp.node_id = node_id;
-    }
     
     // Helper function that waits till the condition variable is notified
     void wait_till_valid() {
@@ -81,16 +75,21 @@ struct HermesValue {
 
     // Helper function that waits till the condition variable is notified with an additional timeout
     // Timeout is in seconds
-    void wait_till_valid_timeout(uint32_t timeout) {
+    void wait_till_valid_or_timeout(uint32_t timeout) {
         std::unique_lock<std::mutex> lock(stall_mutex);
         
         // Wait till the key is in VALID state or timeout occurs
         stall_cv.wait_for(lock, std::chrono::seconds(timeout), [this] {return is_valid();});
     }
 
-    void update_value(const std::string &new_value) {
+    inline Timestamp coord_valid_to_write_transition(const std::string &new_value, uint32_t node_id) {
         std::unique_lock<std::mutex> lock(stall_mutex);
+        State expected = VALID;
+        st.compare_exchange_strong(expected, WRITE);
+        timestamp.logical_time++;
+        timestamp.node_id = node_id;
         value = new_value;
+        return timestamp;
     }
 
     bool is_lower(HermesTimestamp ts) {
@@ -109,11 +108,6 @@ struct HermesValue {
 
     inline bool is_write() {
         return (st.load(std::memory_order_acquire) == WRITE);
-    }
-
-    inline bool coord_valid_to_write_transition() {
-        State expected = VALID;
-        return st.compare_exchange_strong(expected, WRITE);                
     }
 
     inline void coord_write_to_valid_transition() {
@@ -138,10 +132,9 @@ struct HermesValue {
     }
 
     // We check if the transition is possible before making it
-    void fol_valid_to_invalid_transition(std::string value, HermesTimestamp ts) {
+    void fol_invalidate(std::string value, HermesTimestamp ts) {
         std::unique_lock<std::mutex> lock(stall_mutex);
-        State expected = VALID;
-        st.compare_exchange_strong(expected, INVALID);
+        st.store(INVALID, std::memory_order_release);
         this->value = value;
         this->timestamp = Timestamp(ts);
     }

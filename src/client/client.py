@@ -7,9 +7,10 @@ from logging import *
 class HermesClient(Hermes):
     RETRY_TIMEOUT = 10 # seconds
 
-    def __init__(self, server_list: list):
+    def __init__(self, server_list: list, id=0):
         self._server_list = server_list
         self._stubs = list()
+        self._id = id
         for server in self._server_list:
             channel = grpc.insecure_channel(server)
             self._stubs.append(HermesStub(channel))
@@ -18,10 +19,10 @@ class HermesClient(Hermes):
         retries = 5
         while (retries > 0):
             random_server = random.randint(0, len(self._server_list)-1)
-            info(f"Querying server for get: {self._server_list[random_server]}")
+            info(f"[{self._id}]: Querying server for get: {self._server_list[random_server]}")
             try:
                 response = self._stubs[random_server].Read(ReadRequest(key=key), timeout=self.RETRY_TIMEOUT)
-                debug(f"Value: {response.value}")
+                debug(f"[{self._id}]: Value: {response.value}")
                 return response.value
             except Exception as e:
                 retries -= 1
@@ -32,10 +33,10 @@ class HermesClient(Hermes):
         retries = 5
         while (retries > 0):
             random_server = random.randint(0, len(self._server_list)-1)
-            info(f"Querying server for put: {self._server_list[random_server]}")
+            info(f"[{self._id}]: Querying server for put: {self._server_list[random_server]}")
             try:
                 response = self._stubs[random_server].Write(WriteRequest(key=key, value=value), timeout=self.RETRY_TIMEOUT)
-                debug("Put returned")
+                debug(f"[{self._id}]: Put returned")
                 return
             except Exception as e:
                 retries -= 1
