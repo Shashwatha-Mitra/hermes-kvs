@@ -1,6 +1,8 @@
 #include "server.h"
 #include <grpcpp/alarm.h>
 
+using map_iterator = typename std::unordered_map<std::string, std::unique_ptr<HermesValue>>::iterator;
+
 struct GrpcAsyncCall {
     int tag_value;
     grpc::Status status;
@@ -46,11 +48,19 @@ grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx,
         const ReadRequest *req, ReadResponse *resp) {
     auto key = req->key();
     SPDLOG_LOGGER_INFO(logger, "Received Read Request!");
-    if (key_value_map.find(key) == key_value_map.end()) {
+    map_iterator it;
+    map_iterator end_it;
+    {
+        std::shared_lock<std::shared_mutex> lock {hashmap_mutex};
+        it = key_value_map.find(key);
+        end_it = key_value_map.end();
+    }
+    if (it == end_it) {
+        std::string not_found = "Key not found";
+        resp->set_value(not_found);
         return grpc::Status::OK;
     }
 
-    auto it = key_value_map.find(key);
     const auto hermes_val = it->second.get();
     hermes_val->wait_till_valid();
     resp->set_value(hermes_val->value);
@@ -61,9 +71,11 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
     auto key = req->key();
     SPDLOG_LOGGER_INFO(logger, "Received write request");
     HermesValue *hermes_val;
+    // TODO(): Add locks
     if (key_value_map.find(key) == key_value_map.end()) {
         SPDLOG_LOGGER_DEBUG (logger, "Key not found!");
-        hermes_val = new HermesValue(req->value(), server_id);
+        key_value_map[key] = std::make_unique<HermesValue>(req->value(), server_id);
+        hermes_val = key_value_map[key].get();
     } else {
         SPDLOG_LOGGER_DEBUG (logger, "Key found!");
         hermes_val = key_value_map.find(key)->second.get();
@@ -284,7 +296,6 @@ grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const Validat
     if (hermes_val->not_equal(ts)) {
         // Timestamp is not equal to local timestamp, which means a request with higher timestamp must 
         // have been accepted. Ignore
-        SPDLOG_LOGGER_DEBUG(logger, "here\n");
         return grpc::Status::OK;
     }
     hermes_val->fol_invalid_to_valid_transition();

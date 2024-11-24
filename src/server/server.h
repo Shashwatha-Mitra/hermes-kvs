@@ -5,6 +5,7 @@
 #include "state.h"
 
 #include <vector>
+#include <shared_mutex>
 #include <string>
 #include <memory>
 #include <thread>
@@ -28,6 +29,8 @@ private:
     std::string self_addr;
 
     std::mutex server_state_mutex; // Mutex to lock server stubs and server names
+
+    std::shared_mutex hashmap_mutex;
 
     const uint32_t mlt = 1; // Message loss timeout in seconds
 

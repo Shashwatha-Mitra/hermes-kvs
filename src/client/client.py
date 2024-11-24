@@ -2,6 +2,7 @@ from hermes_pb2_grpc import Hermes, HermesStub
 from hermes_pb2 import *
 import grpc
 import random
+from logging import *
 
 class HermesClient(Hermes):
     RETRY_TIMEOUT = 10 # seconds
@@ -17,10 +18,10 @@ class HermesClient(Hermes):
         retries = 5
         while (retries > 0):
             random_server = random.randint(0, len(self._server_list)-1)
-            print(f"Querying server: {self._server_list[random_server]}")
+            info(f"Querying server for get: {self._server_list[random_server]}")
             try:
-                response = self._stubs[random_server].Read(ReadRequest(key=key))
-                print(f"Value: {response.value}")
+                response = self._stubs[random_server].Read(ReadRequest(key=key), timeout=self.RETRY_TIMEOUT)
+                debug(f"Value: {response.value}")
                 return response.value
             except Exception as e:
                 retries -= 1
@@ -31,9 +32,10 @@ class HermesClient(Hermes):
         retries = 5
         while (retries > 0):
             random_server = random.randint(0, len(self._server_list)-1)
-            print(f"Querying server: {self._server_list[random_server]}")
+            info(f"Querying server for put: {self._server_list[random_server]}")
             try:
-                response = self._stubs[random_server].Write(WriteRequest(key=key, value=value))
+                response = self._stubs[random_server].Write(WriteRequest(key=key, value=value), timeout=self.RETRY_TIMEOUT)
+                debug("Put returned")
                 return
             except Exception as e:
                 retries -= 1

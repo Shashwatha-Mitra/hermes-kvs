@@ -119,6 +119,7 @@ struct HermesValue {
     inline void coord_write_to_valid_transition() {
         State expected = WRITE;
         st.compare_exchange_strong(expected, VALID);
+        stall_cv.notify_one();
     }
     
     inline void coord_write_to_invalid_transition() {
@@ -149,5 +150,6 @@ struct HermesValue {
     inline void fol_invalid_to_valid_transition() {
         State expected = INVALID;
         st.compare_exchange_strong(expected, VALID);
+        stall_cv.notify_one();
     }
 };
