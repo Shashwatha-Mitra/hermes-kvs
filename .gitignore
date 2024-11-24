@@ -8,3 +8,6 @@ test/__pycache__/*
 out/*
 *.swo
 *.swp
+
+venv/
+lib64

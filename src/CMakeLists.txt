@@ -1,8 +1,22 @@
-# set(absl_DIR "/home/proteet/git_repos/hermes/grpc/third_party/abseil-cpp/CMake")
-# set(CMAKE_PREFIX_PATH "/home/proteet/.local/lib")
-# Find absl package
-# find_
-SET(GRPC_INSTALLATION_PATH "$ENV{HOME}/.local")
+# Allow specifying GRPC installation path via CMake or fallback to default
+SET(GRPC_INSTALLATION_PATH "$ENV{GRPC_PATH}" CACHE STRING "Path to the GRPC installation")
+
+## Fallback if the GRPC_PATH environment variable is not set
+#IF(NOT GRPC_INSTALLATION_PATH)
+#    SET(GRPC_INSTALLATION_PATH "$ENV{HOME}/.local")
+#ENDIF()
+
+# Verify the GRPC installation path exists
+IF(NOT EXISTS "${GRPC_INSTALLATION_PATH}")
+    message(FATAL_ERROR "GRPC installation not found at: ${GRPC_INSTALLATION_PATH}. Please set GRPC_PATH or GRPC_INSTALLATION_PATH to the correct directory.")
+ENDIF()
+
+# Display the path being used (for debugging)
+message(STATUS "Using GRPC installation path: ${GRPC_INSTALLATION_PATH}")
+
+include_directories("$ENV{SPDLOG_PATH}/include")
+
+#SET(GRPC_INSTALLATION_PATH "$ENV{HOME}/.local")
 include_directories("${GRPC_INSTALLATION_PATH}/include")
 link_directories("${GRPC_INSTALLATION_PATH}/lib")
 SET(CMAKE_PREFIX_PATH GRPC_INSTALLATION_PATH)

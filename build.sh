@@ -3,7 +3,23 @@
 ROOT_DIR=$(pwd)
 BUILD_DIR=$ROOT_DIR/build
 BIN_DIR=$ROOT_DIR/bin
-export PATH="$HOME/.local/bin:$PATH"
+EXTERNAL_DIR=$ROOT_DIR/external
+
+# Get the current username
+current_user=$(whoami)
+
+# Check if the username is "aatmanb"
+if [ "$current_user" == "aatmanb" ]; then
+    export GRPC_PATH="/nobackup2/aatmanb/cs739/kv_store/.local"
+    echo "gRPC path set to $GRPC_PATH"
+    source venv/bin/activate
+else
+    export GPRC_PATH="$HOME/.local"
+    echo "gRPC path set to $GRPC_PATH"
+fi
+
+export SPDLOG_PATH="$EXTERNAL_DIR/spdlog"
+export PATH="$PATH:$GRPC_PATH/bin"
 
 # Check if directories exist, if not create it
 if [ ! -d "$BUILD_DIR" ]; then 
@@ -12,7 +28,7 @@ if [ ! -d "$BUILD_DIR" ]; then
 fi
 
 if [ ! -d "$BIN_DIR" ]; then 
-    echo "Creating Build directory $BIN_DIR"
+    echo "Creating Bin directory $BIN_DIR"
     mkdir -p "$BIN_DIR"
 fi
 
