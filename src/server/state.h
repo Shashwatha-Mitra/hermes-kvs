@@ -26,6 +26,12 @@ struct Timestamp {
         this->node_id = ts.node_id();
     }
 
+    std::string toString() {
+        std::ostringstream stream;
+        stream << node_id << "." << logical_time;
+        return stream.str();
+    }
+
     HermesTimestamp get_grpc_timestamp() {
         HermesTimestamp ts;
         ts.set_node_id(node_id);

@@ -5,8 +5,6 @@ import random
 from logging import *
 
 class HermesClient(Hermes):
-    RETRY_TIMEOUT = 10 # seconds
-
     def __init__(self, server_list: list, id=0):
         self._server_list = server_list
         self._stubs = list()
@@ -15,30 +13,44 @@ class HermesClient(Hermes):
             channel = grpc.insecure_channel(server)
             self._stubs.append(HermesStub(channel))
 
-    def get(self, key):
-        retries = 5
+        self.RETRY_TIMEOUT = 10 # seconds
+        self.NUM_RETRIES = 5
+
+    def access_service(self, op, key, value, num_retries, retry_timeout):
+        assert(op=="get" or op=="put")
+
+        if num_retries:
+            retries = num_retries
+        else:
+            retries = self.NUM_RETRIES
+
+        if retry_timeout:
+            timeout = retry_timeout
+        else:
+            timeout = self.RETRY_TIMEOUT
+
+        if op == "put":
+            assert(value)
+
         while (retries > 0):
             random_server = random.randint(0, len(self._server_list)-1)
-            info(f"[{self._id}]: Querying server for get: {self._server_list[random_server]}")
+            info(f"[{self._id}]: Querying server for {op}: {self._server_list[random_server]}")
             try:
-                response = self._stubs[random_server].Read(ReadRequest(key=key), timeout=self.RETRY_TIMEOUT)
-                debug(f"[{self._id}]: Value: {response.value}")
-                return response.value
+                if (op == "get"):
+                    response = self._stubs[random_server].Read(ReadRequest(key=key), timeout=timeout)
+                    debug(f"[{self._id}]: Value: {response.value}")
+                    return response.value
+                else:
+                    response = self._stubs[random_server].Write(WriteRequest(key=key, value=value), timeout=timeout)
+                    debug(f"[{self._id}]: Put returned")
+                    return
             except Exception as e:
                 retries -= 1
                 if retries == 0:
                     raise e
 
-    def put(self, key, value):
-        retries = 5
-        while (retries > 0):
-            random_server = random.randint(0, len(self._server_list)-1)
-            info(f"[{self._id}]: Querying server for put: {self._server_list[random_server]}")
-            try:
-                response = self._stubs[random_server].Write(WriteRequest(key=key, value=value), timeout=self.RETRY_TIMEOUT)
-                debug(f"[{self._id}]: Put returned")
-                return
-            except Exception as e:
-                retries -= 1
-                if retries == 0:
-                    raise e
+    def get(self, key, num_retries=None, retry_timeout=None):
+        self.access_service("get", key, "", num_retries, retry_timeout)
+
+    def put(self, key, value, num_retries=None, retry_timeout=None):
+        self.access_service("put", key, value, num_retries, retry_timeout)

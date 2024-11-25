@@ -5,7 +5,7 @@ bin/
 src/client/hermes_pb2*
 src/client/__pycache__/
 test/__pycache__/*
-out/*
+out/
 *.swo
 *.swp
 

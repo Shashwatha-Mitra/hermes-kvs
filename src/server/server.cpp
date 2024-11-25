@@ -21,7 +21,7 @@ std::unique_ptr<Hermes::Stub> create_stub(const std::string &addr) {
 HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir, 
         const std::vector<std::string> &server_list,
         uint32_t port)
-        : server_id(id) {
+        : server_id(id), epoch(0) {
     active_servers = std::move(server_list);
     self_addr = "localhost:" + std::to_string(port);
 
@@ -38,18 +38,15 @@ HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir,
     // Set logging level
     logger->set_level(spdlog::level::debug);
     logger->flush_on(spdlog::level::debug);
-    SPDLOG_LOGGER_TRACE(logger , "Trace level logging.. {} ,{}", 1, 3.23);
-    SPDLOG_LOGGER_DEBUG(logger , "Debug level logging.. {} ,{}", 1, 3.23);
-    SPDLOG_LOGGER_INFO(logger , "Info level logging.. {} ,{}", 1, 3.23);
-    SPDLOG_LOGGER_WARN(logger , "Warn level logging.. {} ,{}", 1, 3.23);
-    SPDLOG_LOGGER_ERROR(logger , "Error level logging.. {} ,{}", 1, 3.23);
-    SPDLOG_LOGGER_CRITICAL(logger , "Critical level logging.. {} ,{}", 1, 3.23);
 }
 
 grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx, 
         const ReadRequest *req, ReadResponse *resp) {
-    auto key = req->key();
+    std::string key = req->key();
+
     SPDLOG_LOGGER_INFO(logger, "Received Read Request!");
+    SPDLOG_LOGGER_DEBUG(logger, "key: {}", key);
+
     map_iterator it;
     map_iterator end_it;
     {
@@ -70,8 +67,13 @@ grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx,
 }
 
 grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteRequest *req, Empty *resp) {
-    auto key = req->key();
+    std::string key = req->key();
+    std::string value = req->value();
+
     SPDLOG_LOGGER_INFO(logger, "Received write request");
+    SPDLOG_LOGGER_DEBUG(logger, "key: {}", key);
+    SPDLOG_LOGGER_DEBUG(logger, "value: {}", value);
+
     HermesValue *hermes_val;
     map_iterator it;
     map_iterator end_it;
@@ -84,7 +86,7 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
         SPDLOG_LOGGER_DEBUG (logger, "Key not found!");
         {
             std::unique_lock<std::shared_mutex> lock {hashmap_mutex};
-            key_value_map[key] = std::make_unique<HermesValue>(req->value(), server_id);
+            key_value_map[key] = std::make_unique<HermesValue>(value, server_id);
             hermes_val = key_value_map[key].get();
         }
     } else {
@@ -102,7 +104,7 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
     Save the write timestamp in a local variable. Otherwise it might get overwritten during 
     invalidate and wrong ts might be propragated in an invalidate RPC
     */
-    auto write_ts = hermes_val->coord_valid_to_write_transition(req->value(), server_id);
+    auto write_ts = hermes_val->coord_valid_to_write_transition(value, server_id);
     // } else {
     //     SPDLOG_LOGGER_CRITICAL(logger, "Compare and Swap failed!!. Value still in VALID state.");
     // }
@@ -111,13 +113,13 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
         grpc::CompletionQueue broadcast_queue;
         {
             std::unique_lock<std::mutex> server_state_lock {server_state_mutex};
-            broadcast_invalidate(write_ts, req->value(), key, broadcast_queue);
+            broadcast_invalidate(write_ts, value, key, broadcast_queue);
         }
 
         // Check if the write was interrupted by a higher priority write
         if (!hermes_val->is_write()) {
             // TODO(): This shouldn't be required. Just return
-            SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC in the middle of write RPC");
+            SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC in the middle of write RPC. Aborting write.");
             broadcast_queue.Shutdown();
             break;
         }
@@ -191,7 +193,7 @@ void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &v
     alarm.Set(&cq, deadline, reinterpret_cast<void*>(&alarm_tag));
 
     uint64_t i = 0;
-    auto grpc_ts = ts.get_grpc_timestamp();
+    HermesTimestamp grpc_ts = ts.get_grpc_timestamp();
 
     for (auto& stub: active_server_stubs) {
         // Send invalidates
@@ -217,7 +219,7 @@ void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key) {
     int num_other_servers = active_server_stubs.size();
 
     uint64_t i = 0;
-    auto grpc_ts = ts.get_grpc_timestamp();
+    HermesTimestamp grpc_ts = ts.get_grpc_timestamp();
 
     for (auto& stub: active_server_stubs) {
         ValidateRequest req;
@@ -238,14 +240,15 @@ void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key) {
 
 // Invalidate handling via gRPC
 grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, const InvalidateRequest *req, InvalidateResponse *resp) {
-    SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC");
+    HermesTimestamp ts = req->ts();
+    SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC from node_id: {}", Timestamp(ts).node_id);
     if (req->epoch_id() != epoch) {
         // Epoch id doesnt match. Reject request
+        SPDLOG_LOGGER_DEBUG(logger, "Rejecting invalidate request because received epoch_id {} doesn't match with local epoch id {}", req->epoch_id(), epoch);
         resp->set_accept(false);
         return grpc::Status::OK;
     }
     auto value = req->value();
-    auto ts = req->ts();
     HermesValue* hermes_val {nullptr};
     bool new_key = false;
     
@@ -261,7 +264,7 @@ grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, const Inval
     if (!new_key && hermes_val->is_lower(ts)) {
         // Timestamp is lower than local timestamp. Reject
         resp->set_accept(false);
-        SPDLOG_LOGGER_INFO(logger, "Rejecting Invalidate RPC");
+        SPDLOG_LOGGER_DEBUG(logger, "Rejecting invalidate request because received timestamp {} is lower than local timestamp {}", Timestamp(ts).toString(), hermes_val->timestamp.toString());
         return grpc::Status::OK;
     }
     hermes_val->fol_invalidate(value, ts);
@@ -288,9 +291,9 @@ grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, const Inval
 
 // Called by co-ordinator to validate the current key.
 grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const ValidateRequest *req, Empty *resp) {
-    SPDLOG_LOGGER_INFO(logger, "Received validate RPC");
-    auto& key = req->key();
     auto& ts = req->ts();
+    SPDLOG_LOGGER_INFO(logger, "Received validate RPC from node_id: {}", Timestamp(ts).node_id);
+    auto& key = req->key();
     HermesValue* hermes_val = key_value_map.find(req->key())->second.get();
     // SPDLOG_LOGGER_DEBUG(logger, )
     if (hermes_val->not_equal(ts)) {

@@ -293,7 +293,7 @@ if __name__ == "__main__":
 
     print("Test finished. Terminating service")
     # wait for sometime to flush the stdout buffers to the log file
-    time.sleep(10)
+    time.sleep(2)
     terminateService()
     # for process in load_measurement_processes:
     #    terminateProcess(process)
