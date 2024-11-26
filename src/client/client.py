@@ -34,7 +34,11 @@ class HermesClient(Hermes):
 
         while (retries > 0):
             random_server = random.randint(0, len(self._server_list)-1)
-            info(f"[{self._id}]: Querying server for {op}: {self._server_list[random_server]}")
+            info(f'''[{self._id}]: 
+                Querying server: {self._server_list[random_server]}
+                op: {op}
+                key: {key}
+            ''')
             try:
                 if (op == "get"):
                     response = self._stubs[random_server].Read(ReadRequest(key=key), timeout=timeout)
@@ -54,3 +58,12 @@ class HermesClient(Hermes):
 
     def put(self, key, value, num_retries=None, retry_timeout=None):
         self.access_service("put", key, value, num_retries, retry_timeout)
+
+    def terminate(self, server_id, graceful=True, timeout=10):
+        info(f"[{self._id}]: terminating server: {self._server_list[server_id]}")
+        try:
+            response = self._stubs[server_id].Terminate(TerminateRequest(graceful=graceful), timeout=timeout)
+            debug(f"[{self._id}]: Terminate returned")
+        except Exception as e:
+            print(e.code())
+            raise e

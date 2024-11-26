@@ -1,3 +1,6 @@
+#include <csignal>
+#include <cstdlib>
+
 #include "server.h"
 #include <grpcpp/alarm.h>
 
@@ -20,7 +23,8 @@ std::unique_ptr<Hermes::Stub> create_stub(const std::string &addr) {
 
 HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir, 
         const std::vector<std::string> &server_list,
-        uint32_t port)
+        uint32_t port,
+        std::atomic<bool>& terminate_flag)
         : server_id(id), epoch(0) {
     active_servers = std::move(server_list);
     self_addr = "localhost:" + std::to_string(port);
@@ -29,9 +33,12 @@ HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir,
         if (server == self_addr) continue;
         active_server_stubs.push_back(create_stub(server));
     }
+
+    // Logger initialization
     std::string log_file_name = log_dir + "spdlog_server_" + std::to_string(id) + ".log";
 
     // Initialize the logger and set the flush rate
+    //spdlog::flush_every(std::chrono::microseconds(100));
     spdlog::flush_every(std::chrono::milliseconds(1));
     logger = spdlog::basic_logger_mt("server_logger", log_file_name);
 
@@ -39,6 +46,17 @@ HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir,
     logger->set_level(spdlog::level::debug);
     logger->flush_on(spdlog::level::debug);
 }
+
+//HermesServiceImpl::~HermesServiceImpl() {
+//    SPDLOG_LOGGER_INFO(logger , "killing node");
+//    spdlog::drop("server_logger");
+//    if (spdlog::get("server_logger") == nullptr) {
+//        std::cout << "logger has been successfully deregistered\n";
+//    }
+//    terminate();
+//}
+
+HermesServiceImpl::~HermesServiceImpl() {}
 
 grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx, 
         const ReadRequest *req, ReadResponse *resp) {
@@ -155,7 +173,7 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq) {
     void* next_tag;
     bool ok;
 
-    while (cq.Next(&next_tag, &ok)) {        
+    while (cq.Next(&next_tag, &ok)) {
         if (ok) {
             GrpcAsyncCall<InvalidateResponse>* grpc_tag = static_cast<GrpcAsyncCall<InvalidateResponse>*>(next_tag);
             if (grpc_tag->tag_value == alarm_tag) {
@@ -304,4 +322,71 @@ grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const Validat
     hermes_val->fol_invalid_to_valid_transition();
     SPDLOG_LOGGER_DEBUG(logger, "Validated key after write");
     return grpc::Status::OK;
+}
+
+// Called the server which is going down
+grpc::Status HermesServiceImpl::Mayday(grpc::ServerContext *ctx, const MaydayRequest *req, Empty *resp) {
+    SPDLOG_LOGGER_CRITICAL(logger, "node_id {} is failing gracefully", req->node_id());
+    return grpc::Status::OK;
+}
+
+void HermesServiceImpl::broadcast_mayday(grpc::CompletionQueue &cq) {
+    SPDLOG_LOGGER_INFO(logger, "Broadcasting Mayday RPCs");
+    int num_other_servers = active_server_stubs.size();
+
+    uint64_t i = 0;
+
+    for (auto& stub: active_server_stubs) {
+        MaydayRequest req;
+        req.set_node_id(server_id);
+        GrpcAsyncCall<Empty>* call = new GrpcAsyncCall<Empty>(i);
+
+        auto receiver = stub->AsyncMayday(&call->ctx, req, &cq);
+        receiver->Finish(&call->response, &call->status, (void*)call);
+
+        i++;
+    }
+    SPDLOG_LOGGER_INFO(logger, "Broadcasted Mayday RPCs");
+}
+
+void HermesServiceImpl::receive_mayday_acks(grpc::CompletionQueue &cq) {
+    int acks_received = 0;
+    int num_servers;
+    // Don't use the set of servers since it might be modified by a parallel thread and we don't want locks here
+    num_servers = active_server_stubs.size();
+    void* next_tag;
+    bool ok;
+
+    while (cq.Next(&next_tag, &ok)) {
+        if (ok) {
+            GrpcAsyncCall<Empty>* grpc_tag = static_cast<GrpcAsyncCall<Empty>*>(next_tag);
+            acks_received++;
+            if (acks_received == num_servers) {
+                break;
+            }
+        } else {
+            SPDLOG_LOGGER_CRITICAL(logger, "Not okay!");
+        }
+        // delete grpc_tag;
+    }
+    cq.Shutdown();
+    SPDLOG_LOGGER_INFO(logger, "Received " + std::to_string(acks_received) + " acks");
+}
+
+grpc::Status HermesServiceImpl::Terminate(grpc::ServerContext *ctx, const TerminateRequest *req, Empty *resp) {
+    SPDLOG_LOGGER_CRITICAL(logger, "Terminating because client called Terminate RPC");
+    terminate(req->graceful());
+    return grpc::Status::OK;
+}
+
+void HermesServiceImpl::terminate(bool graceful) {
+    if (graceful) {
+        SPDLOG_LOGGER_CRITICAL(logger, "terminating gracefully");
+        grpc::CompletionQueue mayday_queue;
+        broadcast_mayday(mayday_queue);
+        receive_mayday_acks(mayday_queue);
+    }
+    else {
+        SPDLOG_LOGGER_CRITICAL(logger, "not implemented");
+    }
 }

@@ -11,6 +11,7 @@
 #include <thread>
 #include <cstdint>
 #include <unordered_map>
+#include <atomic>
 #include <grpcpp/grpcpp.h>
 #include <absl/flags/flag.h>
 #include <absl/flags/parse.h>
@@ -53,10 +54,14 @@ private:
 
     void broadcast_validate(Timestamp ts, std::string key);
 
+    void broadcast_mayday(grpc::CompletionQueue &cq);
+
     std::pair<int, int> receive_acks(grpc::CompletionQueue &cq);
 
+    void receive_mayday_acks(grpc::CompletionQueue &cq);
+
 public:
-    HermesServiceImpl(uint32_t id, std::string &log_dir, const std::vector<std::string> &server_list, uint32_t port);
+    HermesServiceImpl(uint32_t id, std::string &log_dir, const std::vector<std::string> &server_list, uint32_t port, std::atomic<bool>& terminate_flag);
 
     grpc::Status Read(grpc::ServerContext *ctx, const ReadRequest *req, ReadResponse *resp) override;
 
@@ -66,7 +71,13 @@ public:
 
     grpc::Status Validate(grpc::ServerContext *ctx, const ValidateRequest *req, Empty *resp) override;
 
-    virtual ~HermesServiceImpl(){}
+    grpc::Status Mayday(grpc::ServerContext *ctx, const MaydayRequest *req, Empty *resp) override;
+
+    grpc::Status Terminate(grpc::ServerContext *ctx, const TerminateRequest *req, Empty *resp) override;
+
+    void terminate(bool graceful = true);
+
+    virtual ~HermesServiceImpl();
 };
 
 // ABSL_FLAG(uint32_t, id, 1, "Server id");

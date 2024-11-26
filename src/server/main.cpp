@@ -1,4 +1,6 @@
 #include <iostream>
+#include <atomic>
+#include <csignal>
 #include "server.h"
 #include "config.h"
 
@@ -6,6 +8,14 @@ ABSL_FLAG(uint32_t, id, 1, "Server id");
 ABSL_FLAG(uint32_t, port, 50050, "Port");
 ABSL_FLAG(std::string, log_dir, "", "log directory");
 ABSL_FLAG(std::string, config_file, "", "Config file");
+
+std::atomic<bool> terminate_flag(false);
+
+void handle_sigterm(int signal) {
+    if (signal == SIGTERM) {
+        terminate_flag.store(true);
+    }
+}
 
 int main(int argc, char** argv) {
     absl::ParseCommandLine(argc, argv);
@@ -15,8 +25,11 @@ int main(int argc, char** argv) {
     std::string server_address("localhost:" + std::to_string(port));
     std::string config_file = absl::GetFlag(FLAGS_config_file);
     auto server_list = parseConfigFile(config_file);
+    
+    // Register signal handler
+    //std::signal(SIGTERM, handle_sigterm);
 
-    HermesServiceImpl service(id, log_dir, server_list, port);
+    HermesServiceImpl service(id, log_dir, server_list, port, terminate_flag);
 
     grpc::ServerBuilder builder;
     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
