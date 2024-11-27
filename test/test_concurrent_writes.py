@@ -1,15 +1,22 @@
 # Standalone test to check concurrent writes on servers
 
 import threading, random, string
-from client import HermesClient
 import logging
+import sys
+import time
+
+sys.path.append('../src/client/')
+from client import HermesClient
+
 
 def gen_random_value():
     return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(10))
 
-b1 = threading.Barrier(2, timeout=5)
-b2 = threading.Barrier(2, timeout=5)
+num_clients = 1
+b1 = threading.Barrier(num_clients, timeout=5)
+b2 = threading.Barrier(num_clients, timeout=5)
 
+server_list = ['localhost:50050', 'localhost:50051', 'localhost:50052', 'localhost:50053', 'localhost:50054']
 
 def run_writes(client_id):
     server_list = ['localhost:50050', 'localhost:50051', 'localhost:50052', 'localhost:50053', 'localhost:50054']
@@ -25,30 +32,45 @@ def run_writes(client_id):
             print(f"[{client_id}]: Incorrect value returned")
         print(f"[{client_id}]: Got value: {val_returned}")
 
-def run_writes_same_key(key, client_id):
+def run_writes_same_key(key, client_id, num_writes):
     # global b1, b2
-    server_list = ['localhost:50050', 'localhost:50051', 'localhost:50052', 'localhost:50053', 'localhost:50054']
-    mock_server_list = ['localhost:50052'] if client_id == 1 else ['localhost:50050']
+    mock_server_list = ['localhost:50052'] #if client_id == 1 else ['localhost:50050']
     client = HermesClient(mock_server_list, id=client_id)
-    for i in range(500):
+    key = gen_random_value()
+    num_retries = 1
+    for i in range(num_writes):
         val = gen_random_value()
         # print(f"[{client_id}]: Putting value: {val}")
         b1.wait()
-        client.put(key, val)
+        client.put(key, val, num_retries=num_retries)
         # print(f"[{client_id}]: Getting value: ")
-        b2.wait()
+        #b2.wait()
         # if client_id == 0:
         #     b1.reset()
         # b2.reset()
-        val_returned = client.get(key)
+        #val_returned = client.get(key, num_retries=num_retries)
+
         # if (val != val_returned) and client_id == 1:
         #     print(f"[{client_id}]: Incorrect value returned")
         # print(f"[{client_id}]: Got value: {val_returned}")
 
+def terminate_server(client_id, server_id):
+    client = HermesClient(server_list, id=client_id)
+    time.sleep(50/1000) # sleep for in ms
+    client.terminate(server_id)
+
 if __name__ == '__main__':
-    # logging.getLogger().setLevel(logging.DEBUG)
+    logging.getLogger().setLevel(logging.DEBUG)
     # threads = [threading.Thread(group=None, target=run_writes, args=(i,)) for i in range(5)]
     key = gen_random_value()
-    threads = [threading.Thread(group=None, target=run_writes_same_key, args=(key, i,)) for i in range(2)]
-    [t.start() for t in threads]
-    [t.join() for t in threads]
+    num_writes = 30
+    op_threads = [threading.Thread(group=None, target=run_writes_same_key, args=(key, i, num_writes,)) for i in range(num_clients)]
+    [t.start() for t in op_threads]
+
+    terminate_server_id = 2
+    terminator_id = num_clients
+    terminate_thread = threading.Thread(group=None, target=terminate_server, args=(terminator_id, terminate_server_id,))
+    terminate_thread.start()
+
+    [t.join() for t in op_threads]
+    terminate_thread.join()

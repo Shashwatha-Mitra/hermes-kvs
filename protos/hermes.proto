@@ -34,6 +34,7 @@ message InvalidateRequest {
 
 message InvalidateResponse {
     required bool accept = 1;
+    required int32 responder = 2;
 }
 
 message ValidateRequest {

@@ -1,5 +1,5 @@
 # Allow specifying GRPC installation path via CMake or fallback to default
-SET(GRPC_INSTALLATION_PATH "$ENV{GRPC_PATH}" CACHE STRING "Path to the GRPC installation")
+SET(GRPC_INSTALLATION_PATH "$ENV{GRPC_PATH}") # CACHE STRING "Path to the GRPC installation")
 
 ## Fallback if the GRPC_PATH environment variable is not set
 #IF(NOT GRPC_INSTALLATION_PATH)
@@ -66,7 +66,12 @@ target_link_libraries(hermes_grpc_proto
   ${_GRPC_GRPCPP}
   ${_PROTOBUF_LIBPROTOBUF})
 
-add_executable(server server/server.cpp server/main.cpp)
+add_executable(server 
+  server/main.cpp
+  server/server.cpp
+  utils/threadsafe_unordered_set.h
+  utils/threadsafe_unordered_map.h
+  )
 # add_executable(client client.cpp)
 
 # message("${absl::log_initialize}")

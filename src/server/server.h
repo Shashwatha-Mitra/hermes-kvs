@@ -19,19 +19,27 @@
 #include "spdlog/include/spdlog/spdlog.h"
 #include "spdlog/include/spdlog/sinks/basic_file_sink.h"
 
+#include "../utils/threadsafe_unordered_set.h"
+
 class HermesServiceImpl: public Hermes::Service {
 private:
     using InvalidateRespReader = typename std::unique_ptr<grpc::ClientAsyncResponseReader<InvalidateResponse>>;
 
-    std::vector<std::unique_ptr<Hermes::Stub>> active_server_stubs;
+    //std::vector<std::unique_ptr<Hermes::Stub>> active_server_stubs;
+    std::unordered_map<uint32_t, std::unique_ptr<Hermes::Stub>> _stubs;
 
-    std::vector<std::string> active_servers;
+    ThreadSafeUnorderedSet<uint32_t> _active_servers;
+    //std::vector<std::string> active_servers;
+    
+    ThreadSafeUnorderedSet<uint32_t> pending_acks;
 
     std::string self_addr;
 
     std::mutex server_state_mutex; // Mutex to lock server stubs and server names
 
     std::shared_mutex hashmap_mutex;
+
+    std::atomic<bool> dead;
 
     const uint32_t mlt = 1; // Message loss timeout in seconds
 
@@ -45,9 +53,10 @@ private:
 
     std::unordered_map<std::string, bool> is_coord_for_key;
 
-    void invalidate_value(HermesValue *val, std::string &key);
-
     std::shared_ptr<spdlog::logger> logger;
+
+
+    void invalidate_value(HermesValue *val, std::string &key);
 
     void broadcast_invalidate(Timestamp &ts, const std::string &value, std::string &key, 
         grpc::CompletionQueue &cq);
@@ -59,6 +68,10 @@ private:
     std::pair<int, int> receive_acks(grpc::CompletionQueue &cq);
 
     void receive_mayday_acks(grpc::CompletionQueue &cq);
+
+    inline uint32_t portToID(uint32_t port);
+
+    uint32_t addrToID(std::string& addr);
 
 public:
     HermesServiceImpl(uint32_t id, std::string &log_dir, const std::vector<std::string> &server_list, uint32_t port, std::atomic<bool>& terminate_flag);

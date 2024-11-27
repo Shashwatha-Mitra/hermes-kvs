@@ -11,11 +11,11 @@ ABSL_FLAG(std::string, config_file, "", "Config file");
 
 std::atomic<bool> terminate_flag(false);
 
-void handle_sigterm(int signal) {
-    if (signal == SIGTERM) {
-        terminate_flag.store(true);
-    }
-}
+//void handle_sigterm(int signal) {
+//    if (signal == SIGTERM) {
+//        terminate_flag.store(true);
+//    }
+//}
 
 int main(int argc, char** argv) {
     absl::ParseCommandLine(argc, argv);
