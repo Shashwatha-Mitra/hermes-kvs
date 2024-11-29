@@ -88,7 +88,7 @@ def createService(config_file, log_dir=''):
     #         master_processes.append(process)
     time.sleep(5)
     servers = get_servers(config_file)
-    print (log_dir)
+    #print (log_dir)
     for server in servers:
         launch_server(server, log_dir, config_file)
 
@@ -128,10 +128,11 @@ def startClients(args):
         cmd = 'python3 simple_client.py'
         cmd += ' ' + f'--id={client_id}'
         cmd += ' ' + f'--config-file={args.config_file}'
-#        cmd += ' ' + f'--test-type={args.test_type}'
-#        cmd += ' ' + f'--top-dir={args.top_dir}'
+        cmd += ' ' + f'--test-type={args.test_type}'
+        cmd += ' ' + f'--top-dir={args.top_dir}'
         cmd += ' ' + f'--log-dir={args.log_dir}'
-#        cmd += ' ' + f'--num-keys={args.num_keys}'
+        cmd += ' ' + f'--num-keys={args.num_keys}'
+        cmd += ' ' + f'--write-percentage={args.write_percentage}'
         
         if (args.vk_ratio != 0):  
             cmd += ' ' + f'--vk_ratio={args.vk_ratio}'
@@ -146,6 +147,10 @@ def startClients(args):
         with open(log_file, 'w') as f:
             process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f)
             client_processes.append(process)
+        
+        if (client_id == 0):
+            print (f'Waiting for client {client_id} to finish populate')
+            time.sleep(8)    
     #manualKillServers()
 
 
@@ -241,7 +246,7 @@ if __name__ == "__main__":
     parser.add_argument('--skew', action='store_true')
     parser.add_argument('--vk_ratio', type=int, default=0, help='ratio of value to key lenght')
     parser.add_argument('--num-keys', type=int, default=1000, help='number of gets to put and get in sanity test')
-
+    parser.add_argument('--write-percentage', type=int, default=0, help='write percentage for performance tests')
 
     parser.add_argument('--only-clients', action='store_true')
     parser.add_argument('--only-service', action='store_true')

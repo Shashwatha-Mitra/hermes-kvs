@@ -13,8 +13,8 @@ class HermesClient(Hermes):
             channel = grpc.insecure_channel(server)
             self._stubs.append(HermesStub(channel))
 
-        self.RETRY_TIMEOUT = 10 # seconds
-        self.NUM_RETRIES = 5
+        self.RETRY_TIMEOUT = 5 # seconds
+        self.NUM_RETRIES = 3
 
     def access_service(self, op, key, value, num_retries, retry_timeout):
         assert(op=="get" or op=="put")
@@ -54,7 +54,7 @@ class HermesClient(Hermes):
                     raise e
 
     def get(self, key, num_retries=None, retry_timeout=None):
-        self.access_service("get", key, "", num_retries, retry_timeout)
+        return self.access_service("get", key, "", num_retries, retry_timeout)
 
     def put(self, key, value, num_retries=None, retry_timeout=None):
         self.access_service("put", key, value, num_retries, retry_timeout)
