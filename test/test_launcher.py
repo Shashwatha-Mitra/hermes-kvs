@@ -150,7 +150,7 @@ def startClients(args):
         
         if (client_id == 0):
             print (f'Waiting for client {client_id} to finish populate')
-            time.sleep(8)    
+            time.sleep(12)    
     #manualKillServers()
 
 

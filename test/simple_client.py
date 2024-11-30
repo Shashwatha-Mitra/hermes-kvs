@@ -52,7 +52,7 @@ if __name__ == "__main__":
    
     server_list = parseConfigFile(config_file)
     
-    logging.basicConfig(level = logging.DEBUG, format='%(asctime)s: %(message)s')
+    logging.basicConfig(level = logging.WARN, format='%(asctime)s: %(message)s')
    
     logging.warning(f"Client {client_id}: Started") 
     cl = HermesClient(server_list)

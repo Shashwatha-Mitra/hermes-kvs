@@ -71,12 +71,14 @@ def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage 
     if len(values) == 0:
         values = [f"VAL{str(i).zfill(length)}" for i in range (num_keys)]
 
-    num_ops = len(keys)
+    num_ops = 10*len(keys)
     num_keys_populated = len(keys)
     num_read_failures = 0
     num_write_failures = 0
     read_times = []
     write_times = []
+    read_failure_keys = []
+    write_failure_keys = []
     
     print (f"Num_ops = {num_ops}, num_keys_populated = {num_keys_populated}")
     expt_start = time.time_ns()
@@ -121,11 +123,15 @@ def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage 
         except Exception as e:
             if (random_value < write_percentage):
                 num_write_failures += 1
+                write_failure_keys.append(key)
+                # print (f'Write Failure for key: {key}, value: {value}.\nException {e}\n')
             elif (value == ''):
                 num_read_failures += 1 
+                read_failure_keys.append(key)
+                # print (f'Read Failure for key: {key}.\nException {e}\n')
 
     expt_end = time.time_ns()
-    expt_duration_in_us = int((expt_end - expt_start)/1000)
+    expt_duration_in_us = (expt_end - expt_start)//1000
     throughput = (num_ops * 1000 * 1000)/(expt_duration_in_us)
     avg_write_duration = 0
     if (len(write_times) > 0):
@@ -161,4 +167,8 @@ def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage 
     
     print ('................................')
     print (f"Throughput = {throughput:.2f}")
+    print ('................................')
+    print ('Failed Keys')
+    print (f'Read Failures: {read_failure_keys}')
+    print (f'Write Failures: {write_failure_keys}')
     print ("\nEnding Performance Tests.................") 

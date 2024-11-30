@@ -13,7 +13,7 @@ class HermesClient(Hermes):
             channel = grpc.insecure_channel(server)
             self._stubs.append(HermesStub(channel))
 
-        self.RETRY_TIMEOUT = 5 # seconds
+        self.RETRY_TIMEOUT = 1 # 1 second
         self.NUM_RETRIES = 3
 
     def access_service(self, op, key, value, num_retries, retry_timeout):

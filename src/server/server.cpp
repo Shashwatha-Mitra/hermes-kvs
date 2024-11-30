@@ -37,8 +37,8 @@ HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir,
     logger = spdlog::basic_logger_mt("server_logger", log_file_name);
 
     // Set logging level
-    logger->set_level(spdlog::level::trace);
-    logger->flush_on(spdlog::level::trace);
+    logger->set_level(spdlog::level::info);
+    logger->flush_on(spdlog::level::info);
     
     //active_servers = std::move(server_list);
     self_addr = "localhost:" + std::to_string(port);
