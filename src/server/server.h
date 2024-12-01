@@ -65,7 +65,7 @@ private:
 
     void broadcast_mayday(grpc::CompletionQueue &cq);
 
-    std::pair<int, int> receive_acks(grpc::CompletionQueue &cq);
+    std::pair<int, int> receive_acks(grpc::CompletionQueue &cq, std::string key);
 
     void receive_mayday_acks(grpc::CompletionQueue &cq);
 

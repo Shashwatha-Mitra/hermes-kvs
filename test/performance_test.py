@@ -71,7 +71,7 @@ def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage 
     if len(values) == 0:
         values = [f"VAL{str(i).zfill(length)}" for i in range (num_keys)]
 
-    num_ops = 10*len(keys)
+    num_ops = len(keys)
     num_keys_populated = len(keys)
     num_read_failures = 0
     num_write_failures = 0

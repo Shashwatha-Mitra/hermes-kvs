@@ -37,8 +37,8 @@ HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir,
     logger = spdlog::basic_logger_mt("server_logger", log_file_name);
 
     // Set logging level
-    logger->set_level(spdlog::level::info);
-    logger->flush_on(spdlog::level::info);
+    logger->set_level(spdlog::level::trace);
+    logger->flush_on(spdlog::level::trace);
     
     //active_servers = std::move(server_list);
     self_addr = "localhost:" + std::to_string(port);
@@ -113,7 +113,9 @@ grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx,
         }
 
         const auto hermes_val = it->second.get();
+        SPDLOG_LOGGER_INFO(logger, "Read request! Key: {}, Value: {}, State: {}", key, hermes_val->value, hermes_val->state_to_string());
         hermes_val->wait_till_valid();
+        SPDLOG_LOGGER_INFO(logger, "Done waiting! Serving request for Key: {}, Value: {}, State: {}", key, hermes_val->value, hermes_val->state_to_string());
         resp->set_value(hermes_val->value);
         return grpc::Status::OK;
     }
@@ -150,19 +152,10 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
         }
 
         // Stall writes till we are sure that the key is valid
+        SPDLOG_LOGGER_TRACE (logger, "Waiting for key: {} to be valid", key);
         hermes_val->wait_till_valid();
-        /**
-        TODO: Debug this!!
-        Compare and Swap operations usually should succeed. But since we are using enums as is
-        we could face failures. If we are continually succeeding, we can drop this check and 
-        make coord_valid_to_write_transition() inline void to make this cleaner. 
-        Save the write timestamp in a local variable. Otherwise it might get overwritten during 
-        invalidate and wrong ts might be propragated in an invalidate RPC
-        */
+        SPDLOG_LOGGER_TRACE (logger, "Done watiting for the key: {}", key);
         auto write_ts = hermes_val->coord_valid_to_write_transition(value, server_id);
-        // } else {
-        //     SPDLOG_LOGGER_CRITICAL(logger, "Compare and Swap failed!!. Value still in VALID state.");
-        // }
 
         while (true) {
             grpc::CompletionQueue broadcast_queue;
@@ -174,20 +167,20 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
             // Check if the write was interrupted by a higher priority write
             if (!hermes_val->is_write()) {
                 // TODO(): This shouldn't be required. Just return
-                SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC in the middle of write RPC. Aborting write.");
+                SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC for key {} in the middle of write RPC. Aborting write.", key);
                 broadcast_queue.Shutdown();
                 break;
             }
 
             // Wait till all the acks for the invalidate arrives 
-            auto res = receive_acks(broadcast_queue);
+            auto res = receive_acks(broadcast_queue, key);
             int acks = res.first;
             int acceptances = res.second;
     
             //if (acceptances == _stubs.size()) {
             assert(pending_acks.empty());
             if (acceptances == _active_servers.size()) {
-                SPDLOG_LOGGER_DEBUG(logger, "Received all acceptances");
+                SPDLOG_LOGGER_DEBUG(logger, "Received all acceptances for key: {}", key);
                 // Value was accepted by all the nodes, we can trasition safely back to valid state
                 // and propagate a VAL message to all the nodes. Wait till we get ACKs back (do we need this??)
                 // auto thread = std::thread(std::bind(&HermesServiceImpl::broadcast_validate, this, hermes_val->timestamp, key));
@@ -204,7 +197,7 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
     return grpc::Status(grpc::StatusCode::UNAVAILABLE, "server is down");
 }
 
-std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq) {
+std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, std::string key) {
     int acks_received = 0;
     int acceptances_received = 0;
     int num_servers, alarm_tag;
@@ -224,11 +217,11 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq) {
             } else {
                 // Get the node_id of the node which sent the ACK and erase that entry from the pending_acks set
                 uint32_t responder = grpc_tag->response.responder();
-                SPDLOG_LOGGER_TRACE(logger, "received ACK from {}", responder);
+                SPDLOG_LOGGER_TRACE(logger, "received ACK from {} for key {}", responder, key);
                 pending_acks.erase(responder);
                 //acks_received++;
                 if (grpc_tag->response.accept()) {
-                    SPDLOG_LOGGER_TRACE(logger, "Invalidate accepted");
+                    SPDLOG_LOGGER_TRACE(logger, "Invalidate accepted from {} for key {}", responder, key);
                     acceptances_received++;
                 }
                 //if (acks_received == num_servers) {
@@ -249,7 +242,7 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq) {
 
 void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &value, std::string &key, 
         grpc::CompletionQueue &cq) {   
-    SPDLOG_LOGGER_INFO(logger, "Broadcasting INVALIDATE RPCs");
+    SPDLOG_LOGGER_INFO(logger, "Broadcasting INVALIDATE RPCs for key {}", key);
     //int num_other_servers = _stubs.size();
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(mlt);
 
@@ -268,7 +261,7 @@ void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &v
 
     //for (auto& stub: _stubs) {
     for (auto& server: active_servers) {
-        SPDLOG_LOGGER_TRACE(logger, "sending invalidate to node_id: {}", server);
+        SPDLOG_LOGGER_TRACE(logger, "sending invalidate to node_id: {}, for key {}", server, key);
         auto& stub = _stubs[server];
         // Send invalidates
         InvalidateRequest req;
@@ -284,12 +277,12 @@ void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &v
         grpc_ts = *(req.release_ts());
         i++;
     }
-    SPDLOG_LOGGER_INFO(logger, "Broadcasted Invalidate RPCs");
+    SPDLOG_LOGGER_INFO(logger, "Broadcasted Invalidate RPCs for key {}", key);
 }
 
 void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key) {
     grpc::CompletionQueue cq;
-    SPDLOG_LOGGER_INFO(logger, "Broadcasting VALIDATE RPCs");
+    SPDLOG_LOGGER_INFO(logger, "Broadcasting VALIDATE RPCs for key {}", key);
     //int num_other_servers = _stubs.size();
 
     uint64_t i = 0;
@@ -303,6 +296,7 @@ void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key) {
 
     //for (auto& stub: _stubs) {
     for (auto& server: active_servers) {
+        SPDLOG_LOGGER_TRACE(logger, "sending VALIDATE to node_id: {}, for key {}", server, key);
         auto& stub = _stubs[server];
         ValidateRequest req;
         req.set_key(key);
@@ -315,7 +309,7 @@ void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key) {
         grpc_ts = *(req.release_ts());
         i++;
     }
-    SPDLOG_LOGGER_INFO(logger, "Broadcasted validate RPCs");
+    SPDLOG_LOGGER_INFO(logger, "Broadcasted validate RPCs for key {}", key);
     // Dont wait for responses
     cq.Shutdown();
 }
@@ -323,7 +317,7 @@ void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key) {
 // Invalidate handling via gRPC
 grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, const InvalidateRequest *req, InvalidateResponse *resp) {
     HermesTimestamp ts = req->ts();
-    SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC from node_id: {}", Timestamp(ts).node_id);
+    SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC from node_id: {} for key {}", Timestamp(ts).node_id, req->key());
     if (req->epoch_id() != epoch) {
         // Epoch id doesnt match. Reject request
         SPDLOG_LOGGER_DEBUG(logger, "Rejecting invalidate request because received epoch_id {} doesn't match with local epoch id {}", req->epoch_id(), epoch);
@@ -350,7 +344,7 @@ grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, const Inval
         return grpc::Status::OK;
     }
     hermes_val->fol_invalidate(value, ts);
-    SPDLOG_LOGGER_INFO(logger, "Accepting Invalidate RPC");
+    SPDLOG_LOGGER_INFO(logger, "Accepting Invalidate RPC for key {}", req->key());
     resp->set_accept(true);
 
     // Send the node_id so that the receiver knows which node send the ack
@@ -377,7 +371,7 @@ grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, const Inval
 // Called by co-ordinator to validate the current key.
 grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const ValidateRequest *req, Empty *resp) {
     auto& ts = req->ts();
-    SPDLOG_LOGGER_INFO(logger, "Received validate RPC from node_id: {}", Timestamp(ts).node_id);
+    SPDLOG_LOGGER_INFO(logger, "Received validate RPC from node_id: {} for key {}", Timestamp(ts).node_id, req->key());
     auto& key = req->key();
     HermesValue* hermes_val = key_value_map.find(req->key())->second.get();
     // SPDLOG_LOGGER_DEBUG(logger, )
@@ -387,7 +381,7 @@ grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const Validat
         return grpc::Status::OK;
     }
     hermes_val->fol_invalid_to_valid_transition();
-    SPDLOG_LOGGER_DEBUG(logger, "Validated key after write");
+    SPDLOG_LOGGER_DEBUG(logger, "Validated key {} after write", key);
     return grpc::Status::OK;
 }
 
