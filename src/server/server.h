@@ -28,14 +28,15 @@ private:
     //std::vector<std::unique_ptr<Hermes::Stub>> active_server_stubs;
     std::unordered_map<uint32_t, std::unique_ptr<Hermes::Stub>> _stubs;
 
-    ThreadSafeUnorderedSet<uint32_t> _active_servers;
+    // ThreadSafeUnorderedSet<uint32_t> _active_servers;
     //std::vector<std::string> active_servers;
+    std::vector<uint32_t> _active_servers;
     
     ThreadSafeUnorderedSet<uint32_t> pending_acks;
 
     std::string self_addr;
 
-    std::mutex server_state_mutex; // Mutex to lock server stubs and server names
+    std::shared_mutex server_state_mutex; // Mutex to lock server stubs and server names
 
     std::shared_mutex hashmap_mutex;
 
@@ -59,13 +60,15 @@ private:
     void invalidate_value(HermesValue *val, std::string &key);
 
     void broadcast_invalidate(Timestamp &ts, const std::string &value, std::string &key, 
-        grpc::CompletionQueue &cq);
+        grpc::CompletionQueue &cq, std::vector<uint32_t> &servers, 
+        std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs);
 
-    void broadcast_validate(Timestamp ts, std::string key);
+    void broadcast_validate(Timestamp ts, std::string key, std::vector<uint32_t> &servers, 
+        std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs);
 
     void broadcast_mayday(grpc::CompletionQueue &cq);
 
-    std::pair<int, int> receive_acks(grpc::CompletionQueue &cq);
+    std::pair<int, int> receive_acks(grpc::CompletionQueue &cq, std::string key, uint32_t num_servers);
 
     void receive_mayday_acks(grpc::CompletionQueue &cq);
 
