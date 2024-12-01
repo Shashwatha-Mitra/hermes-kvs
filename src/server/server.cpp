@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <string>
 #include <stdexcept>
+#include <chrono>
 
 #include "server.h"
 #include <grpcpp/alarm.h>
@@ -48,7 +49,7 @@ HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir,
         //_stubs.push_back(create_stub(server));
         uint32_t other_id = addrToID(server);
         SPDLOG_LOGGER_INFO(logger, "Adding {} to active list", other_id);
-        _active_servers.insert(other_id);
+        _active_servers.push_back(other_id);
         _stubs[other_id] = create_stub(server);
         //_stubs.insert(create_stub(server));
     }
@@ -158,11 +159,24 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
         auto write_ts = hermes_val->coord_valid_to_write_transition(value, server_id);
 
         while (true) {
+            std::vector<uint32_t> current_active_servers;
+            std::vector<std::unique_ptr<Hermes::Stub>> server_stubs;
             grpc::CompletionQueue broadcast_queue;
             {
-                std::unique_lock<std::mutex> server_state_lock {server_state_mutex};
-                broadcast_invalidate(write_ts, value, key, broadcast_queue);
+                std::shared_lock<std::shared_mutex> server_state_lock {server_state_mutex};
+                current_active_servers.resize(_active_servers.size());
+                std::copy(_active_servers.begin(), _active_servers.end(), current_active_servers.begin());
+                // current_active_servers = _active_servers.copy();
             }
+            auto start = std::chrono::system_clock::now();
+            for (auto& server: current_active_servers) {
+                std::string addr = "localhost:" + std::to_string(server);
+                server_stubs.push_back(create_stub(addr));
+            }
+            auto end = std::chrono::system_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end-start).count();
+            SPDLOG_LOGGER_TRACE (logger, "Took {} us to create grpc stubs", duration);
+            broadcast_invalidate(write_ts, value, key, broadcast_queue, current_active_servers, server_stubs);
 
             // Check if the write was interrupted by a higher priority write
             if (!hermes_val->is_write()) {
@@ -173,21 +187,21 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
             }
 
             // Wait till all the acks for the invalidate arrives 
-            auto res = receive_acks(broadcast_queue, key);
+            auto res = receive_acks(broadcast_queue, key, current_active_servers.size());
             int acks = res.first;
             int acceptances = res.second;
     
             //if (acceptances == _stubs.size()) {
-            assert(pending_acks.empty());
-            if (acceptances == _active_servers.size()) {
+            if (acceptances == current_active_servers.size()) {
                 SPDLOG_LOGGER_DEBUG(logger, "Received all acceptances for key: {}", key);
                 // Value was accepted by all the nodes, we can trasition safely back to valid state
                 // and propagate a VAL message to all the nodes. Wait till we get ACKs back (do we need this??)
                 // auto thread = std::thread(std::bind(&HermesServiceImpl::broadcast_validate, this, hermes_val->timestamp, key));
-                {
-                    std::unique_lock<std::mutex> server_state_lock {server_state_mutex};
-                    broadcast_validate(hermes_val->timestamp, key);
-                }
+                // {
+                //     std::unique_lock<std::mutex> server_state_lock {server_state_mutex};
+                    
+                // }
+                broadcast_validate(hermes_val->timestamp, key, current_active_servers, server_stubs);
                 hermes_val->coord_write_to_valid_transition();
                 break;
             }
@@ -197,12 +211,12 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
     return grpc::Status(grpc::StatusCode::UNAVAILABLE, "server is down");
 }
 
-std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, std::string key) {
+std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, std::string key, uint32_t num_servers) {
     int acks_received = 0;
     int acceptances_received = 0;
-    int num_servers, alarm_tag;
+    int alarm_tag;
     // Don't use the set of servers since it might be modified by a parallel thread and we don't want locks here
-    num_servers = _stubs.size();
+    // num_servers = _stubs.size();
     alarm_tag = -1;
     void* next_tag;
     bool ok;
@@ -218,14 +232,14 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, s
                 // Get the node_id of the node which sent the ACK and erase that entry from the pending_acks set
                 uint32_t responder = grpc_tag->response.responder();
                 SPDLOG_LOGGER_TRACE(logger, "received ACK from {} for key {}", responder, key);
-                pending_acks.erase(responder);
-                //acks_received++;
+                // pending_acks.erase(responder);
+                acks_received++;
                 if (grpc_tag->response.accept()) {
                     SPDLOG_LOGGER_TRACE(logger, "Invalidate accepted from {} for key {}", responder, key);
                     acceptances_received++;
                 }
-                //if (acks_received == num_servers) {
-                if (pending_acks.empty()) {
+                if (acks_received == num_servers) {
+                // if (pending_acks.empty()) {
                     break;
                 }
             }
@@ -235,13 +249,14 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, s
         // delete grpc_tag;
     }
     cq.Shutdown();
-    SPDLOG_LOGGER_INFO(logger, "(DNU) Received " + std::to_string(acks_received) + " acks");
+    SPDLOG_LOGGER_INFO(logger, "Received " + std::to_string(acks_received) + " acks");
     SPDLOG_LOGGER_INFO(logger, "Received " + std::to_string(acceptances_received) + " acceptances");
     return std::make_pair<>(acks_received, acceptances_received);
 }
 
 void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &value, std::string &key, 
-        grpc::CompletionQueue &cq) {   
+        grpc::CompletionQueue &cq, std::vector<uint32_t> &servers,
+        std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs) {   
     SPDLOG_LOGGER_INFO(logger, "Broadcasting INVALIDATE RPCs for key {}", key);
     //int num_other_servers = _stubs.size();
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(mlt);
@@ -254,15 +269,14 @@ void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &v
     HermesTimestamp grpc_ts = ts.get_grpc_timestamp();
 
     // Get the list of currently active servers in the cluster
-    std::unordered_set<uint32_t> active_servers = _active_servers.copy();
+    // std::unordered_set<uint32_t> active_servers = _active_servers.copy();
 
     // Expect acks from all the active servers. If a server goes down, this set is updated in the mayday RPC
-    pending_acks = ThreadSafeUnorderedSet<uint32_t> {active_servers};
+    // pending_acks = ThreadSafeUnorderedSet<uint32_t> {active_servers};
 
     //for (auto& stub: _stubs) {
-    for (auto& server: active_servers) {
+    for (auto& server: servers) {
         SPDLOG_LOGGER_TRACE(logger, "sending invalidate to node_id: {}, for key {}", server, key);
-        auto& stub = _stubs[server];
         // Send invalidates
         InvalidateRequest req;
         req.set_key(key);
@@ -271,7 +285,7 @@ void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &v
         req.set_epoch_id(epoch);
         GrpcAsyncCall<InvalidateResponse>* call = new GrpcAsyncCall<InvalidateResponse>(i);
 
-        auto receiver = stub->AsyncInvalidate(&call->ctx, req, &cq);
+        auto receiver = server_stubs[i]->AsyncInvalidate(&call->ctx, req, &cq);
         receiver->Finish(&call->response, &call->status, (void*)call);
 
         grpc_ts = *(req.release_ts());
@@ -280,30 +294,31 @@ void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &v
     SPDLOG_LOGGER_INFO(logger, "Broadcasted Invalidate RPCs for key {}", key);
 }
 
-void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key) {
+void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key, std::vector<uint32_t> &servers, 
+        std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs) {
     grpc::CompletionQueue cq;
     SPDLOG_LOGGER_INFO(logger, "Broadcasting VALIDATE RPCs for key {}", key);
     //int num_other_servers = _stubs.size();
 
-    uint64_t i = 0;
     HermesTimestamp grpc_ts = ts.get_grpc_timestamp();
 
     // Get the list of currently active servers in the cluster
-    std::unordered_set<uint32_t> active_servers = _active_servers.copy();
+    // std::unordered_set<uint32_t> active_servers = _active_servers.copy();
 
     // Expect acks from all the active servers. If a server goes down, this set is updated in the mayday RPC
-    pending_acks = ThreadSafeUnorderedSet<uint32_t> {active_servers};
+    // pending_acks = ThreadSafeUnorderedSet<uint32_t> {active_servers};
 
     //for (auto& stub: _stubs) {
-    for (auto& server: active_servers) {
+    uint64_t i = 0;
+    for (auto& server: servers) {
         SPDLOG_LOGGER_TRACE(logger, "sending VALIDATE to node_id: {}, for key {}", server, key);
-        auto& stub = _stubs[server];
+        // auto& stub = _stubs[server];
         ValidateRequest req;
         req.set_key(key);
         req.set_allocated_ts(&grpc_ts);
         GrpcAsyncCall<Empty>* call = new GrpcAsyncCall<Empty>(i);
 
-        auto receiver = stub->AsyncValidate(&call->ctx, req, &cq);
+        auto receiver = server_stubs[i]->AsyncValidate(&call->ctx, req, &cq);
         receiver->Finish(&call->response, &call->status, (void*)call);
 
         grpc_ts = *(req.release_ts());
@@ -385,13 +400,21 @@ grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const Validat
     return grpc::Status::OK;
 }
 
-// Called the server which is going down
+// Called (by?) the server which is going down
 grpc::Status HermesServiceImpl::Mayday(grpc::ServerContext *ctx, const MaydayRequest *req, Empty *resp) {
     uint32_t failing_node = req->node_id();
     SPDLOG_LOGGER_CRITICAL(logger, "node_id {} is failing gracefully", failing_node);
-    _active_servers.erase(failing_node);
+    // _active_servers.erase(failing_node);
     // This server will not receive an ACK, if it was expecting one, from the failing node.
-    pending_acks.erase(failing_node);
+    // pending_acks.erase(failing_node);
+    {
+        std::unique_lock<std::shared_mutex> server_state_lock {server_state_mutex};
+        for (auto it = _active_servers.begin(); it!= _active_servers.end(); it++) {
+            if (*it == failing_node) {
+                _active_servers.erase(it);
+            }
+        }
+    }
     return grpc::Status::OK;
 }
 
@@ -402,7 +425,9 @@ void HermesServiceImpl::broadcast_mayday(grpc::CompletionQueue &cq) {
     uint64_t i = 0;
     
     // Get the list of currently active servers in the cluster
-    std::unordered_set<uint32_t> active_servers = _active_servers.copy();
+    // std::unordered_set<uint32_t> active_servers = _active_servers.copy();
+    std::vector<uint32_t> active_servers(_active_servers.size());
+    std::copy(_active_servers.begin(), _active_servers.end(), active_servers.begin());
 
     //for (auto& stub: _stubs) {
     for (auto& server: active_servers) {
