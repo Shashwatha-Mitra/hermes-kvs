@@ -70,7 +70,6 @@ add_executable(server
   server/main.cpp
   server/server.cpp
   utils/threadsafe_unordered_set.h
-  utils/threadsafe_unordered_map.h
   )
 # add_executable(client client.cpp)
 
@@ -87,4 +86,19 @@ target_link_libraries(server
 #     hermes_grpc_proto
 #     absl::flags absl::flags_parse 
 #     gRPC::grpc++
-#     protobuf) 
+#     protobuf)
+
+add_executable(master
+  master/main.cpp
+  master/master.cpp
+  utils/threadsafe_unordered_set.h
+)
+
+target_link_libraries(master 
+    hermes_grpc_proto
+    absl::flags absl::flags_parse 
+    #  absl::log_initialize
+    # absl::log_globals
+    gRPC::grpc++
+    protobuf    
+)

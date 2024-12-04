@@ -61,4 +61,6 @@ service Hermes {
     rpc Validate(ValidateRequest) returns (Empty) {}
 
     rpc Mayday(MaydayRequest) returns (Empty) {}
+
+    rpc Heartbeat(Empty) returns (Empty) {}
 }

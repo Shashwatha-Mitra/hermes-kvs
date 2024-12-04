@@ -76,6 +76,14 @@ private:
 
     uint32_t addrToID(std::string& addr);
 
+    grpc::Status Invalidate(grpc::ServerContext *ctx, const InvalidateRequest *req, InvalidateResponse *resp) override;
+
+    grpc::Status Validate(grpc::ServerContext *ctx, const ValidateRequest *req, Empty *resp) override;
+
+    grpc::Status Mayday(grpc::ServerContext *ctx, const MaydayRequest *req, Empty *resp) override;
+
+    std::string get_tid();
+
 public:
     HermesServiceImpl(uint32_t id, std::string &log_dir, const std::vector<std::string> &server_list, uint32_t port, std::atomic<bool>& terminate_flag);
 
@@ -83,13 +91,9 @@ public:
 
     grpc::Status Write(grpc::ServerContext *ctx, const WriteRequest *req, Empty *resp) override;
 
-    grpc::Status Invalidate(grpc::ServerContext *ctx, const InvalidateRequest *req, InvalidateResponse *resp) override;
-
-    grpc::Status Validate(grpc::ServerContext *ctx, const ValidateRequest *req, Empty *resp) override;
-
-    grpc::Status Mayday(grpc::ServerContext *ctx, const MaydayRequest *req, Empty *resp) override;
-
     grpc::Status Terminate(grpc::ServerContext *ctx, const TerminateRequest *req, Empty *resp) override;
+
+    grpc::Status Heartbeat(grpc::ServerContext *ctx, const Empty *req, Empty *resp) override;
 
     void terminate(bool graceful = true);
 

@@ -92,12 +92,18 @@ uint32_t HermesServiceImpl::addrToID(std::string& addr) {
     }
 }
 
+std::string HermesServiceImpl::get_tid() {
+    std::stringstream ss;
+    ss << std::this_thread::get_id();
+    return ss.str();
+}
+
 grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx, 
         const ReadRequest *req, ReadResponse *resp) {
     if (!dead.load()) {
         std::string key = req->key();
 
-        SPDLOG_LOGGER_INFO(logger, "Received Read Request!");
+        SPDLOG_LOGGER_INFO(logger, "{}::Received Read Request!", get_tid());
         SPDLOG_LOGGER_DEBUG(logger, "key: {}", key);
 
         map_iterator it;
@@ -108,11 +114,13 @@ grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx,
             end_it = key_value_map.end();
         }
         if (it == end_it) {
+            SPDLOG_LOGGER_DEBUG (logger, "Read::Key not found!");
             std::string not_found = "Key not found";
             resp->set_value(not_found);
             return grpc::Status::OK;
         }
 
+        SPDLOG_LOGGER_DEBUG (logger, "Read::Key found!");
         const auto hermes_val = it->second.get();
         hermes_val->wait_till_valid();
         resp->set_value(hermes_val->value);
@@ -126,7 +134,7 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
         std::string key = req->key();
         std::string value = req->value();
 
-        SPDLOG_LOGGER_INFO(logger, "Received write request");
+        SPDLOG_LOGGER_INFO(logger, "{}::Received write request", get_tid());
         SPDLOG_LOGGER_DEBUG(logger, "key: {}", key);
         SPDLOG_LOGGER_DEBUG(logger, "value: {}", value);
 
@@ -139,14 +147,14 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
             end_it = key_value_map.end();
         }
         if (it == end_it) {
-            SPDLOG_LOGGER_DEBUG (logger, "Key not found!");
+            SPDLOG_LOGGER_DEBUG (logger, "Write::Key not found!");
             {
                 std::unique_lock<std::shared_mutex> lock {hashmap_mutex};
                 key_value_map[key] = std::make_unique<HermesValue>(value, server_id);
                 hermes_val = key_value_map[key].get();
             }
         } else {
-            SPDLOG_LOGGER_DEBUG (logger, "Key found!");
+            SPDLOG_LOGGER_DEBUG (logger, "Write::Key found!");
             hermes_val = it->second.get();
         }
 
@@ -238,7 +246,7 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, s
             } else {
                 // Get the node_id of the node which sent the ACK and erase that entry from the pending_acks set
                 uint32_t responder = grpc_tag->response.responder();
-                SPDLOG_LOGGER_TRACE(logger, "received ACK from {} for key {}", responder, key);
+                SPDLOG_LOGGER_TRACE(logger, "{}::received ACK from {} for key {}", get_tid(), responder, key);
                 // pending_acks.erase(responder);
                 acks_received++;
                 if (grpc_tag->response.accept()) {
@@ -264,7 +272,7 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, s
 void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &value, std::string &key, 
         grpc::CompletionQueue &cq, std::vector<uint32_t> &servers,
         std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs) {   
-    SPDLOG_LOGGER_INFO(logger, "Broadcasting INVALIDATE RPCs for key {}", key);
+    SPDLOG_LOGGER_INFO(logger, "{}::Broadcasting INVALIDATE RPCs for key {}", get_tid(), key);
     //int num_other_servers = _stubs.size();
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(mlt);
 
@@ -304,7 +312,7 @@ void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &v
 void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key, std::vector<uint32_t> &servers, 
         std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs) {
     grpc::CompletionQueue cq;
-    SPDLOG_LOGGER_INFO(logger, "Broadcasting VALIDATE RPCs");
+    SPDLOG_LOGGER_INFO(logger, "{}::Broadcasting VALIDATE RPCs", get_tid());
     //int num_other_servers = _stubs.size();
 
     HermesTimestamp grpc_ts = ts.get_grpc_timestamp();
@@ -410,7 +418,7 @@ grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const Validat
 // Called (by?) the server which is going down
 grpc::Status HermesServiceImpl::Mayday(grpc::ServerContext *ctx, const MaydayRequest *req, Empty *resp) {
     uint32_t failing_node = req->node_id();
-    SPDLOG_LOGGER_CRITICAL(logger, "node_id {} is failing gracefully", failing_node);
+    SPDLOG_LOGGER_CRITICAL(logger, "node_id {} is failed", failing_node);
     // _active_servers.erase(failing_node);
     // This server will not receive an ACK, if it was expecting one, from the failing node.
     // pending_acks.erase(failing_node);
@@ -494,4 +502,8 @@ void HermesServiceImpl::terminate(bool graceful) {
     else {
         SPDLOG_LOGGER_CRITICAL(logger, "not implemented");
     }
+}
+
+grpc::Status HermesServiceImpl::Heartbeat(grpc::ServerContext *ctx, const Empty *req, Empty *resp) {
+    return grpc::Status::OK;
 }
