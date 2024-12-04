@@ -13,7 +13,7 @@ std::unique_ptr<Hermes::Stub> create_stub(const std::string &addr) {
 Master::Master(uint32_t id, std::string &log_dir, 
         const std::vector<std::string> &server_list
         )
-        : server_id(id), stop(false) {
+        : server_id(id), stop(false), epoch(0) {
     // Logger initialization
     std::string log_file_name = log_dir + "spdlog_master_" + std::to_string(id) + ".log";
 
@@ -92,6 +92,7 @@ void Master::sendHeartbeats() {
     }
 
     for (auto server: failed_servers) {
+        epoch++;
         reconfigure(server);
     }
 }
@@ -102,10 +103,12 @@ void Master::reconfigure(uint32_t server, bool fail) {
 
     if (fail) {
         for (auto active: active_servers) {
+            SPDLOG_LOGGER_TRACE(logger, "sending mayday to {}", active);
             auto& stub = _stubs[active];
             grpc::ClientContext ctx;
             MaydayRequest req;
             req.set_node_id(server);
+            req.set_epoch_id(epoch);
             Empty resp;
             grpc::Status status = stub->Mayday(&ctx, req, &resp);
             assert(status.ok());

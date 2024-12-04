@@ -44,6 +44,7 @@ message ValidateRequest {
 
 message MaydayRequest {
     required int32 node_id = 1;
+    required int32 epoch_id = 2;
 }
 
 message TerminateRequest {

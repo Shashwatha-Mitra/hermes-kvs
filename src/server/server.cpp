@@ -134,6 +134,8 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
         std::string key = req->key();
         std::string value = req->value();
 
+        uint32_t current_epoch;
+
         SPDLOG_LOGGER_INFO(logger, "{}::Received write request", get_tid());
         SPDLOG_LOGGER_DEBUG(logger, "key: {}", key);
         SPDLOG_LOGGER_DEBUG(logger, "value: {}", value);
@@ -181,6 +183,7 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
                 std::shared_lock<std::shared_mutex> server_state_lock {server_state_mutex};
                 current_active_servers.resize(_active_servers.size());
                 std::copy(_active_servers.begin(), _active_servers.end(), current_active_servers.begin());
+                current_epoch = epoch;
                 // current_active_servers = _active_servers.copy();
             }
             auto start = std::chrono::system_clock::now();
@@ -191,7 +194,7 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
             auto end = std::chrono::system_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end-start).count();
             SPDLOG_LOGGER_TRACE (logger, "Took {} us to create grpc stubs", duration);
-            broadcast_invalidate(write_ts, value, key, broadcast_queue, current_active_servers, server_stubs);
+            broadcast_invalidate(write_ts, value, key, broadcast_queue, current_active_servers, server_stubs, current_epoch);
 
             // Check if the write was interrupted by a higher priority write
             if (!hermes_val->is_write()) {
@@ -271,7 +274,7 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, s
 
 void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &value, std::string &key, 
         grpc::CompletionQueue &cq, std::vector<uint32_t> &servers,
-        std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs) {   
+        std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs, uint32_t epoch) {   
     SPDLOG_LOGGER_INFO(logger, "{}::Broadcasting INVALIDATE RPCs for key {}", get_tid(), key);
     //int num_other_servers = _stubs.size();
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(mlt);
@@ -424,11 +427,16 @@ grpc::Status HermesServiceImpl::Mayday(grpc::ServerContext *ctx, const MaydayReq
     // pending_acks.erase(failing_node);
     {
         std::unique_lock<std::shared_mutex> server_state_lock {server_state_mutex};
+        SPDLOG_LOGGER_DEBUG(logger, "lock acquired to modify membership list");
         for (auto it = _active_servers.begin(); it!= _active_servers.end(); it++) {
             if (*it == failing_node) {
                 _active_servers.erase(it);
+                SPDLOG_LOGGER_DEBUG(logger, "removing failed node_id {}", *it);
+                break;
             }
         }
+        SPDLOG_LOGGER_DEBUG(logger, "old epoch is {}, new epoch is {}", epoch, req->epoch_id());
+        epoch = req->epoch_id();
     }
     return grpc::Status::OK;
 }
@@ -449,6 +457,7 @@ void HermesServiceImpl::broadcast_mayday(grpc::CompletionQueue &cq) {
         auto& stub = _stubs[server];
         MaydayRequest req;
         req.set_node_id(server_id);
+        req.set_epoch_id(epoch+1);
         GrpcAsyncCall<Empty>* call = new GrpcAsyncCall<Empty>(i);
 
         auto receiver = stub->AsyncMayday(&call->ctx, req, &cq);

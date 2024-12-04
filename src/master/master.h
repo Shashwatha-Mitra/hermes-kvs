@@ -32,6 +32,8 @@ private:
     
     uint32_t server_id;
 
+    uint32_t epoch;
+
     bool stop;
 
     std::shared_ptr<spdlog::logger> logger;
