@@ -155,6 +155,12 @@ void HermesServiceImpl::performWrite(HermesValue *hermes_val) {
         SPDLOG_LOGGER_TRACE (logger, "Took {} us to create grpc stubs", duration);
         broadcast_invalidate(write_ts, value, key, broadcast_queue, current_active_servers, server_stubs, current_epoch);
 
+        //// To test write replay
+        //if (server_id == 50052) {
+        //    terminate();
+        //    return;
+        //}
+
         // Check if the write was interrupted by a higher priority write
         if (!hermes_val->is_write()) {
             // TODO(): This shouldn't be required. Just return
@@ -181,6 +187,10 @@ void HermesServiceImpl::performWrite(HermesValue *hermes_val) {
             broadcast_validate(hermes_val->timestamp, key, current_active_servers, server_stubs);
             hermes_val->coord_write_to_valid_transition();
             break;
+        }
+        else {
+            // backoff
+            //std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
 }
@@ -294,7 +304,7 @@ grpc::Status HermesServiceImpl::Write(grpc::ServerContext *ctx, const WriteReque
 void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &value, std::string &key, 
         grpc::CompletionQueue &cq, std::vector<uint32_t> &servers,
         std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs, uint32_t epoch) {   
-    SPDLOG_LOGGER_INFO(logger, "{}::Broadcasting INVALIDATE RPCs for key {}", get_tid(), key);
+    SPDLOG_LOGGER_INFO(logger, "[{}]::Broadcasting INVALIDATE RPCs for key {}", get_tid(), key);
     //int num_other_servers = _stubs.size();
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(mlt);
 
@@ -315,7 +325,7 @@ void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &v
 
     //for (auto& stub: _stubs) {
     for (auto& server: servers) {
-        SPDLOG_LOGGER_TRACE(logger, "sending invalidate to node_id: {}, for key {} with grpc_tag={}", server, key, i);
+        SPDLOG_LOGGER_TRACE(logger, "[{}]::sending invalidate to node_id: {}, for key {} with grpc_tag={}", get_tid(), server, key, i);
         // Send invalidates
         InvalidateRequest req;
         req.set_key(key);
@@ -330,7 +340,7 @@ void HermesServiceImpl::broadcast_invalidate(Timestamp &ts, const std::string &v
         grpc_ts = *(req.release_ts());
         i++;
     }
-    SPDLOG_LOGGER_INFO(logger, "Broadcasted Invalidate RPCs");
+    SPDLOG_LOGGER_INFO(logger, "[{}]::Broadcasted Invalidate RPCs", get_tid());
 }
 
 std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, std::string key, uint32_t num_servers) {
@@ -348,7 +358,7 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, s
             GrpcAsyncCall<InvalidateResponse>* grpc_tag = static_cast<GrpcAsyncCall<InvalidateResponse>*>(next_tag);
             if (grpc_tag->tag_value == alarm_tag) {
                 // MLT expired. Return from this function and keep retrying...
-                SPDLOG_LOGGER_INFO(logger, "Alarm expired while broadcasting");
+                SPDLOG_LOGGER_INFO(logger, "[{}]::Alarm expired while broadcasting", get_tid());
                 break;
             } else {
                 // Get the node_id of the node which sent the ACK and erase that entry from the pending_acks set
@@ -379,7 +389,7 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, s
 void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key, std::vector<uint32_t> &servers, 
         std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs) {
     grpc::CompletionQueue cq;
-    SPDLOG_LOGGER_INFO(logger, "{}::Broadcasting VALIDATE RPCs", get_tid());
+    SPDLOG_LOGGER_INFO(logger, "[{}]::Broadcasting VALIDATE RPCs", get_tid());
     //int num_other_servers = _stubs.size();
 
     HermesTimestamp grpc_ts = ts.get_grpc_timestamp();
@@ -393,7 +403,7 @@ void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key, std::v
     //for (auto& stub: _stubs) {
     uint64_t i = 0;
     for (auto& server: servers) {
-        SPDLOG_LOGGER_TRACE(logger, "sending VALIDATE to node_id: {}, for key {}", server, key);
+        SPDLOG_LOGGER_TRACE(logger, "[{}]::sending VALIDATE to node_id: {}, for key {}", get_tid(), server, key);
         // auto& stub = _stubs[server];
         ValidateRequest req;
         req.set_key(key);
@@ -406,7 +416,7 @@ void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key, std::v
         grpc_ts = *(req.release_ts());
         i++;
     }
-    SPDLOG_LOGGER_INFO(logger, "Broadcasted validate RPCs");
+    SPDLOG_LOGGER_INFO(logger, "[{}]::Broadcasted validate RPCs", get_tid());
     // Dont wait for responses
     cq.Shutdown();
 }
@@ -485,21 +495,21 @@ grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const Validat
 // Called (by?) the server which is going down
 grpc::Status HermesServiceImpl::Mayday(grpc::ServerContext *ctx, const MaydayRequest *req, Empty *resp) {
     uint32_t failing_node = req->node_id();
-    SPDLOG_LOGGER_CRITICAL(logger, "node_id {} failed", failing_node);
+    SPDLOG_LOGGER_CRITICAL(logger, "[{}]::node_id {} failed", get_tid(), failing_node);
     // _active_servers.erase(failing_node);
     // This server will not receive an ACK, if it was expecting one, from the failing node.
     // pending_acks.erase(failing_node);
     {
         std::unique_lock<std::shared_mutex> server_state_lock {server_state_mutex};
-        SPDLOG_LOGGER_DEBUG(logger, "lock acquired to modify membership list");
+        SPDLOG_LOGGER_DEBUG(logger, "[{}]::lock acquired to modify membership list", get_tid());
         for (auto it = _active_servers.begin(); it!= _active_servers.end(); it++) {
             if (*it == failing_node) {
-                SPDLOG_LOGGER_DEBUG(logger, "removing failed node_id {}", *it);
+                SPDLOG_LOGGER_DEBUG(logger, "[{}]::removing failed node_id {}", get_tid(), *it);
                 _active_servers.erase(it);
                 break;
             }
         }
-        SPDLOG_LOGGER_DEBUG(logger, "old epoch is {}, new epoch is {}", epoch, req->epoch_id());
+        SPDLOG_LOGGER_DEBUG(logger, "[{}]::old epoch is {}, new epoch is {}", get_tid(), epoch, req->epoch_id());
         epoch = req->epoch_id();
     }
     return grpc::Status::OK;

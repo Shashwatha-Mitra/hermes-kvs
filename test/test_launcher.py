@@ -7,6 +7,7 @@ import signal
 import shutil
 import random
 import numpy as np
+import threading
 
 build_dir = ''
 db_dir = ''
@@ -66,31 +67,38 @@ def launch_server(server_port, log_dir='', config_file=''):
 
     with open(log_file, 'w') as f:
         process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
+        print(f"server {server_port}, pid {process.pid}")
         server_processes.append(process)
 
-def createService(config_file, log_dir=''):
+def launch_master(config_file, port, log_dir):
+    cmd = build_dir + 'master'
+    cmd += ' ' + f'--id={port}'
+    cmd += ' ' + f'--port={port}'
+    cmd += ' ' + f'--log_dir={log_dir}'
+    cmd += ' ' + f'--config_file={config_file}'
+    
+    print(f"Starting master")
+    print(cmd)
+    log_file = log_dir + f'master.log'
+
+    global master_processes
+
+    with open(log_file, 'w') as f:
+        process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
+        master_processes.append(process)
+    
+def createService(config_file, master_port, log_dir='', start_master=True):
     #TODO: start the manager before creating chains
 
-    # if master_port:
-    #     cmd = build_dir + 'master'
-    #     cmd += ' ' + f'--db_dir={db_dir}'
-    #     cmd += ' ' + f'--config_path={config_file}'
-    #     cmd += ' ' + f'--log_dir={log_dir}'
-        
-    #     print(f"Starting master")
-    #     print(cmd)
-    #     log_file = log_dir + f'master.log'
-
-    #     global master_processes
-
-    #     with open(log_file, 'w') as f:
-    #         process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
-    #         master_processes.append(process)
-    time.sleep(5)
+    #time.sleep(5)
     servers = get_servers(config_file)
+    #servers = servers[1:]
     print (log_dir)
     for server in servers:
         launch_server(server, log_dir, config_file)
+
+    if start_master:
+        launch_master(config_file, master_port, log_dir)
 
     # partitions = getPartitionConfig(config_file)
     # for _, servers in partitions.items():
@@ -205,19 +213,21 @@ def startKiller(config_file, clean=1, strategy='random'):
 
 def manualKillServers(choice, wait_time = 1):
     time.sleep(wait_time)
-    choice = 0
     global server_processes
     node = None
-    if (choice == 0):
-        print ('Killing tail server')
-        node = server_processes[-1]
-    elif (choice == 1):
-        print ('Killing head server')
-        node = server_processes[0]
-    else:
-        node = random.choice(server_processes[1:-1])
-        node = server_processes[1]
-        print (f'Killing server {node}')
+    assert(choice < len(server_processes))
+    node = server_processes[choice]
+    print (f'Killing server {node}')
+    #if (choice == 0):
+    #    print ('Killing tail server')
+    #    node = server_processes[-1]
+    #elif (choice == 1):
+    #    print ('Killing head server')
+    #    node = server_processes[0]
+    #else:
+    #    node = random.choice(server_processes[1:-1])
+    #    node = server_processes[1]
+    #    print (f'Killing server {node}')
         
 
     if (node != None):
@@ -237,7 +247,7 @@ if __name__ == "__main__":
     parser.add_argument('--top-dir', type=str, default='../', help='path to top dir')
     parser.add_argument('--log-dir', type=str, default='out/', help='path to log dir')
     parser.add_argument('--num-clients', type=int, default=1, help='number of clients')
-    parser.add_argument('--master-port', type=str, default='50000', help='master port')
+    parser.add_argument('--master-port', type=str, default='60060', help='master port')
     parser.add_argument('--skew', action='store_true')
     parser.add_argument('--vk_ratio', type=int, default=0, help='ratio of value to key lenght')
     parser.add_argument('--num-keys', type=int, default=1000, help='number of gets to put and get in sanity test')
@@ -260,9 +270,11 @@ if __name__ == "__main__":
 
     checkAndMakeDir(log_dir)
 
+    graceful_failure = False
+
     if (not args.only_clients):
         try:
-            createService(config_file, log_dir)
+            createService(config_file, args.master_port, log_dir=log_dir, start_master=(not graceful_failure))
         except Exception as e:
             print(f"An unexpected exception occured while starting service: {e}")
             terminateTest()
@@ -279,7 +291,9 @@ if __name__ == "__main__":
             terminateTest()
 
     # if args.test_type == 'availability':
-    # manualKillServers(0)
+    #manualKillServers(0)
+    if not graceful_failure:
+        threading.Thread(target=manualKillServers, args=(2,6,)).start()
 
     # time.sleep(5)
     # startServer([10, 5450], 50000, log_dir, db_dir)
