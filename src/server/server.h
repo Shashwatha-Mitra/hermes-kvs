@@ -21,6 +21,8 @@
 
 #include "../utils/threadsafe_unordered_set.h"
 
+using map_iterator = typename std::unordered_map<std::string, std::unique_ptr<HermesValue>>::iterator;
+
 class HermesServiceImpl: public Hermes::Service {
 private:
     using InvalidateRespReader = typename std::unique_ptr<grpc::ClientAsyncResponseReader<InvalidateResponse>>;
@@ -83,6 +85,18 @@ private:
     grpc::Status Mayday(grpc::ServerContext *ctx, const MaydayRequest *req, Empty *resp) override;
 
     std::string get_tid();
+
+    void performWrite(HermesValue *hermes_val);
+
+    void performRead();
+
+    void performWriteReplay(HermesValue *hermes_val);
+
+    std::pair<bool, map_iterator> isKeyPresent(std::string key);
+
+    HermesValue* writeNewKey(std::string key, std::string value);
+
+    bool isCoordinator(HermesValue *hermes_val);
 
 public:
     HermesServiceImpl(uint32_t id, std::string &log_dir, const std::vector<std::string> &server_list, uint32_t port, std::atomic<bool>& terminate_flag);
