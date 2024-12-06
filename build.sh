@@ -14,12 +14,12 @@ if [ "$current_user" == "aatmanb" ]; then
     echo "gRPC path set to $GRPC_PATH"
     source venv/bin/activate
 else
-    export GPRC_PATH="$HOME/.local"
+    export GRPC_PATH="$HOME/.local"
     echo "gRPC path set to $GRPC_PATH"
 fi
 
 export SPDLOG_PATH="$EXTERNAL_DIR/spdlog"
-export PATH="$PATH:$GRPC_PATH/bin"
+export PATH="$GRPC_PATH/bin:$PATH"
 
 # Check if directories exist, if not create it
 if [ ! -d "$BUILD_DIR" ]; then 
