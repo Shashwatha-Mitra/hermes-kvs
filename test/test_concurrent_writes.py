@@ -12,7 +12,7 @@ from client import HermesClient
 def gen_random_value():
     return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(10))
 
-num_clients = 2
+num_clients = 100
 b1 = threading.Barrier(num_clients, timeout=5)
 b2 = threading.Barrier(num_clients, timeout=5)
 
@@ -103,17 +103,17 @@ def terminate_server(client_id, server_id):
     client.terminate(server_id)
 
 if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.DEBUG)
+    logging.getLogger().setLevel(logging.INFO)
     # threads = [threading.Thread(group=None, target=run_writes, args=(i,)) for i in range(5)]
     key = gen_random_value()
-    num_writes = 1000
+    num_writes = 100
     num_reads = 100
     op_threads = []
     for i in range(num_clients):
         if i%2 == 0:
             op_threads.append(threading.Thread(group=None, target=run_writes, args=(key, i, num_writes, ['localhost:50052'])))
         else:
-            op_threads.append(threading.Thread(group=None, target=run_reads, args=(key, i, num_reads, ['localhost:50050'])))
+            op_threads.append(threading.Thread(group=None, target=run_reads, args=(key, i, num_reads, ['localhost:50052'])))
     #op_threads = [threading.Thread(group=None, target=run_writes_same_key, args=(key, i, num_writes,)) for i in range(num_clients)]
     [t.start() for t in op_threads]
 

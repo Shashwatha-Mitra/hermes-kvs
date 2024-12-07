@@ -15,7 +15,7 @@ Master::Master(uint32_t id, std::string &log_dir,
         )
         : server_id(id), stop(false), epoch(0) {
     // Logger initialization
-    std::string log_file_name = log_dir + "spdlog_master_" + std::to_string(id) + ".log";
+    std::string log_file_name = log_dir + "/spdlog_master_" + std::to_string(id) + ".log";
 
     // Initialize the logger and set the flush rate
     //spdlog::flush_every(std::chrono::microseconds(100));

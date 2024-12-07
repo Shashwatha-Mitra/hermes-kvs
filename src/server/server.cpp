@@ -28,7 +28,7 @@ HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir,
         std::atomic<bool>& terminate_flag)
         : server_id(id), epoch(0) {
     // Logger initialization
-    std::string log_file_name = log_dir + "spdlog_server_" + std::to_string(id) + ".log";
+    std::string log_file_name = log_dir + "/spdlog_server_" + std::to_string(id) + ".log";
 
     // Initialize the logger and set the flush rate
     //spdlog::flush_every(std::chrono::microseconds(100));

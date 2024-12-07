@@ -8,15 +8,20 @@ import shutil
 import random
 import numpy as np
 import threading
+import psutil
+import csv
+from datetime import datetime
 
 build_dir = ''
 db_dir = ''
 log_dir = ''
 
 load_measurement_processes = []
-master_processes = []
-server_processes = []
+master_processes = {}
+server_processes = {}
 client_processes = []
+
+monitor_stop_event = threading.Event()
 
 def getPartitionConfig(config_file):
     # initialize the partition dictionary
@@ -49,7 +54,7 @@ def get_servers(config_file):
     return servers
 
 def getServerCmd(log_dir, config_file, port):
-    cmd = build_dir + 'server'
+    cmd = build_dir + '/server'
     cmd += ' ' + f'--id={port}'
     cmd += ' ' + f'--port={port}'
     cmd += ' ' + f'--log_dir={log_dir}'
@@ -61,17 +66,17 @@ def launch_server(server_port, log_dir='', config_file=''):
     cmd = getServerCmd(log_dir, config_file, server_port)
     print(f"Starting server {server_port}")
     print(cmd)
-    log_file = log_dir + f'server_{server_port}.log'
+    log_file = log_dir + f'/server_{server_port}.log'
 
     global server_processes
 
     with open(log_file, 'w') as f:
         process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
         print(f"server {server_port}, pid {process.pid}")
-        server_processes.append(process)
+        server_processes[server_port] = process
 
 def launch_master(config_file, port, log_dir):
-    cmd = build_dir + 'master'
+    cmd = build_dir + '/master'
     cmd += ' ' + f'--id={port}'
     cmd += ' ' + f'--port={port}'
     cmd += ' ' + f'--log_dir={log_dir}'
@@ -79,13 +84,13 @@ def launch_master(config_file, port, log_dir):
     
     print(f"Starting master")
     print(cmd)
-    log_file = log_dir + f'master.log'
+    log_file = log_dir + f'/master.log'
 
     global master_processes
 
     with open(log_file, 'w') as f:
         process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
-        master_processes.append(process)
+        master_processes[port] = process
     
 def createService(config_file, master_port, log_dir='', start_master=True):
     #TODO: start the manager before creating chains
@@ -115,12 +120,12 @@ def terminateProcess(process):
 
 def terminateMaster():
     global master_processes
-    for process in master_processes:
+    for _, process in master_processes.items():
         terminateProcess(process)
 
 def terminateServers():
     global server_processes
-    for process in server_processes:
+    for _, process in server_processes.items():
         terminateProcess(process)
 
 def terminateService():
@@ -187,9 +192,9 @@ def checkAndMakeDir(path):
 def startLoadMeasurement(log_dir, master_processes, server_processes):
     cmd = 'python3 measure_load.py'
     pid_str = ''
-    for process in master_processes:
+    for _, process in master_processes.items():
         pid_str += ' ' + str(process.pid)
-    for process in server_processes:
+    for _, process in server_processes.items():
         pid_str += ' ' + str(process.pid)
     cmd += ' ' + f'--pids' + pid_str
     cmd += ' ' + f'--snapshot-duration=2'
@@ -211,30 +216,70 @@ def startKiller(config_file, clean=1, strategy='random'):
         process = subprocess.Popen(killer_process_cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
         return process
 
-def manualKillServers(choice, wait_time = 1):
+def manualKillServers(server_id, wait_time = 1):
     time.sleep(wait_time)
     global server_processes
-    node = None
-    assert(choice < len(server_processes))
-    node = server_processes[choice]
-    print (f'Killing server {node}')
-    #if (choice == 0):
-    #    print ('Killing tail server')
-    #    node = server_processes[-1]
-    #elif (choice == 1):
-    #    print ('Killing head server')
-    #    node = server_processes[0]
-    #else:
-    #    node = random.choice(server_processes[1:-1])
-    #    node = server_processes[1]
-    #    print (f'Killing server {node}')
-        
+    assert(server_id in server_processes.keys())
+    node = server_processes[server_id]
+    print (f'Killing server {server_id}')
 
     if (node != None):
         terminateProcess(node)
-        server_processes.remove(node)
+        del server_processes[server_id]
     else:
         print ('Cannot remove a non-existing process')
+
+def monitor_cpu_utilization(processes, output_csv, sampling_rate=1, duration=30, stop_event=None):
+    """
+    Launches the commands as subprocesses and monitors their CPU utilization, dumping results into a CSV.
+    
+    Args:
+        output_csv (str): Path to the output CSV file.
+        sampling_rate (int): Sampling rate in seconds.
+        duration (int): Total duration for monitoring in seconds.
+    """
+    cpu_count = psutil.cpu_count(logical=True)
+    max_cpu_utilization = cpu_count * 100 # each CPU can contribute 100%
+
+    parent_psutil_processes = {}
+    child_psutil_processes = {}
+    processes_list = list(processes.values())
+    # Monitor CPU utilization
+    for server_id, process in processes.items():
+        parent_psutil_processes[server_id] = psutil.Process(process.pid)
+        child_processes = parent_psutil_processes[server_id].children(recursive=False)
+        # Each parent server process should fork only 1 child process
+        assert(len(child_processes) == 1)
+        child_psutil_processes[server_id] = psutil.Process(child_processes[0].pid)
+
+    # Use child process to monitor CPU utilization
+    psutil_processes = child_psutil_processes
+
+    # Prepare CSV
+    with open(output_csv, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        
+        # Write header: Timestamp + PIDs
+        header = ["Timestamp"] + [f"{server_id}_{proc.pid}" for server_id, proc in psutil_processes.items()]
+        writer.writerow(header)
+        
+        print(f"Monitoring CPU utilization for {duration} seconds... (sampling rate: {sampling_rate}s)")
+        start_time = time.time()
+
+        while not stop_event.is_set():
+            row = [datetime.now().strftime('%Y-%m-%d %H:%M:%S')]  # Add timestamp
+            
+            for proc in psutil_processes.values():
+                if proc.is_running():
+                    cpu_usage = (proc.cpu_percent(interval=0.8*sampling_rate)/max_cpu_utilization) * 100
+                    row.append(cpu_usage)
+                else:
+                    row.append("N/A")  # Process not running
+            
+            writer.writerow(row)  # Write the row to the CSV
+            #print(f"Sampled CPU usage: {row}")
+            time.sleep(sampling_rate)
+    
 
 if __name__ == "__main__":
 
@@ -244,13 +289,14 @@ if __name__ == "__main__":
 #    parser.add_argument('--eeal-fname', type=str, default='real')
 #    parser.add_argument('--fake-fname', type=str, default='fake')
     parser.add_argument('--test-type', type=str, default='sanity', help='sanity, correctness, crash_consistency, perf, availability')
-    parser.add_argument('--top-dir', type=str, default='../', help='path to top dir')
-    parser.add_argument('--log-dir', type=str, default='out/', help='path to log dir')
+    parser.add_argument('--top-dir', type=str, default='..', help='path to top dir')
+    parser.add_argument('--log-dir', type=str, default='out', help='path to log dir')
     parser.add_argument('--num-clients', type=int, default=1, help='number of clients')
     parser.add_argument('--master-port', type=str, default='60060', help='master port')
     parser.add_argument('--skew', action='store_true')
     parser.add_argument('--vk_ratio', type=int, default=0, help='ratio of value to key lenght')
     parser.add_argument('--num-keys', type=int, default=1000, help='number of gets to put and get in sanity test')
+    parser.add_argument('--protocol', type=str, default='hermes', help="replication protocol - hermes or cr")
 
 
     parser.add_argument('--only-clients', action='store_true')
@@ -259,12 +305,20 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     top_dir = args.top_dir
+
+    if (args.protocol == 'hermes'):
+        build_dir = top_dir + '/build/src'
+        log_dir = top_dir + '/' + args.log_dir + '/hermes'
+    elif (args.protocol == 'cr'):
+        build_dir = top_dir + '/../kv_store/bin'
+        log_dir = top_dir + '/' + args.log_dir + '/cr'
+    else:
+        assert(0)
+
     test_type = args.test_type
-    config_file = top_dir + args.config_file
+    config_file = top_dir + '/' + args.config_file
     
-    build_dir = top_dir + 'build/src/'
-    db_dir = top_dir + 'db/'
-    log_dir = top_dir + args.log_dir
+    db_dir = top_dir + '/db/'
     
     assert (not (args.only_clients and args.only_service))
 
@@ -282,6 +336,9 @@ if __name__ == "__main__":
  #       time.sleep(30)
 
     # startLoadMeasurement(log_dir, master_processes, server_processes)
+    cpu_utilization_csv = log_dir + '/cpu_utilization.csv'
+    monitor_cpu_utilization_thread = threading.Thread(target=monitor_cpu_utilization, args=(server_processes, cpu_utilization_csv, 0.01, 5, monitor_stop_event,))
+    monitor_cpu_utilization_thread.start()
 
     if (not args.only_service):
         try:
@@ -292,8 +349,9 @@ if __name__ == "__main__":
 
     # if args.test_type == 'availability':
     #manualKillServers(0)
-    if not graceful_failure:
-        threading.Thread(target=manualKillServers, args=(2,6,)).start()
+    #if not graceful_failure:
+    #    kill_server_thread = threading.Thread(target=manualKillServers, args=('50052',6,))
+    #    kill_server_thread.start()
 
     # time.sleep(5)
     # startServer([10, 5450], 50000, log_dir, db_dir)
@@ -308,6 +366,9 @@ if __name__ == "__main__":
     print("Test finished. Terminating service")
     # wait for sometime to flush the stdout buffers to the log file
     time.sleep(2)
+    monitor_stop_event.set()
+    monitor_cpu_utilization_thread.join()
+    #kill_server_thread.join()
     terminateService()
     # for process in load_measurement_processes:
     #    terminateProcess(process)

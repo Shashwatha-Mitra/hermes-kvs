@@ -35,7 +35,7 @@ class HermesClient(Hermes):
 
         while (retries > 0):
             random_server = random.randint(0, len(self._server_list)-1)
-            info(f'''[{self._id}]: 
+            debug(f'''[{self._id}]: 
                 Querying server: {self._server_list[random_server]}
                 op: {op}
                 key: {key}
