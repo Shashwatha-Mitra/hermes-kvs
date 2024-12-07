@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--id', type=int, default=1, help='Client id')
     parser.add_argument('--config-file', type=str, default='test_config.txt', help='chain configuration file')
-    parser.add_argument('--test-type', type=str, default='sanity', help='sanity, correctness, crash_consistency, perf, kill')
+    parser.add_argument('--test-type', type=str, default='sanity', help='sanity, correctness, crash_consistency, perf, failure')
     parser.add_argument('--top-dir', type=str, default='', help='path to top dir')
     parser.add_argument('--log-dir', type=str, default='out/', help='path to log dir')
     parser.add_argument('--num-keys', type=int, default=10, help='number of gets to put and get in sanity test')
@@ -55,7 +55,7 @@ if __name__ == "__main__":
     logging.basicConfig(level = logging.WARN, format='%(asctime)s: %(message)s')
    
     logging.warning(f"Client {client_id}: Started") 
-    cl = HermesClient(server_list)
+    cl = HermesClient(server_list, client_id)
 
     if (test_type == 'sanity'):
         sanity.test(cl)
@@ -71,3 +71,14 @@ if __name__ == "__main__":
         logging.warning("Starting perf tests")
         performance_test.performanceTest(cl, num_keys, keys, values, write_per, args.skew, args.vk_ratio)
         logging.warning("Client {client_id} ended perf tests")
+    elif (test_type == 'failure'):
+        keys = []
+        values = []
+        if (client_id == 0):
+            keys, values = performance_test.populateDB(cl, num_keys, args.vk_ratio)
+            logging.warning("Populate done!")
+        if (client_id == 1):
+            fail.terminate(cl, True)         
+        logging.warning("Starting Failure Perf tests")
+        performance_test.performanceTest(cl, num_keys, keys, values, write_per, args.skew, args.vk_ratio)
+        logging.warning("Client {client_id} ended Failure Perf tests")

@@ -151,6 +151,8 @@ def startClients(args):
         if (client_id == 0):
             print (f'Waiting for client {client_id} to finish populate')
             time.sleep(20)    
+        
+
     #manualKillServers()
 
 
@@ -238,7 +240,7 @@ if __name__ == "__main__":
     parser.add_argument('--config-file', type=str, default='test_config.txt', help='chain configuration file')
 #    parser.add_argument('--eeal-fname', type=str, default='real')
 #    parser.add_argument('--fake-fname', type=str, default='fake')
-    parser.add_argument('--test-type', type=str, default='sanity', help='sanity, correctness, crash_consistency, perf, availability')
+    parser.add_argument('--test-type', type=str, default='sanity', help='sanity, correctness, crash_consistency, perf, availability, failure')
     parser.add_argument('--top-dir', type=str, default='../', help='path to top dir')
     parser.add_argument('--log-dir', type=str, default='out/', help='path to log dir')
     parser.add_argument('--num-clients', type=int, default=1, help='number of clients')
