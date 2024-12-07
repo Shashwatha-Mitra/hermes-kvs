@@ -53,17 +53,19 @@ def get_servers(config_file):
             servers.append(server)
     return servers
 
-def getServerCmd(log_dir, config_file, port):
+def getServerCmd(log_dir, config_file, port, master_port, db_dir):
     cmd = build_dir + '/server'
     cmd += ' ' + f'--id={port}'
     cmd += ' ' + f'--port={port}'
     cmd += ' ' + f'--log_dir={log_dir}'
     cmd += ' ' + f'--config_file={config_file}'
+    cmd += ' ' + f'--master_port={master_port}'
+    cmd += ' ' + f'--db_dir={db_dir}'
     
     return cmd
 
-def launch_server(server_port, log_dir='', config_file=''):
-    cmd = getServerCmd(log_dir, config_file, server_port)
+def launch_server(server_port, master_port, log_dir='', config_file='', db_dir=''):
+    cmd = getServerCmd(log_dir, config_file, server_port, master_port, db_dir)
     print(f"Starting server {server_port}")
     print(cmd)
     log_file = log_dir + f'/server_{server_port}.log'
@@ -75,12 +77,13 @@ def launch_server(server_port, log_dir='', config_file=''):
         print(f"server {server_port}, pid {process.pid}")
         server_processes[server_port] = process
 
-def launch_master(config_file, port, log_dir):
+def launch_master(config_file, port, log_dir, db_dir):
     cmd = build_dir + '/master'
     cmd += ' ' + f'--id={port}'
     cmd += ' ' + f'--port={port}'
     cmd += ' ' + f'--log_dir={log_dir}'
     cmd += ' ' + f'--config_file={config_file}'
+    cmd += ' ' + f'--db_dir={db_dir}'
     
     print(f"Starting master")
     print(cmd)
@@ -92,20 +95,32 @@ def launch_master(config_file, port, log_dir):
         process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
         master_processes[port] = process
     
-def createService(config_file, master_port, log_dir='', start_master=True):
+def createService(protocol, config_file, master_port, log_dir='', db_dir='', start_master=True):
     #TODO: start the manager before creating chains
 
     #time.sleep(5)
-    servers = get_servers(config_file)
-    #servers = servers[1:]
     print (log_dir)
-    for server in servers:
-        launch_server(server, log_dir, config_file)
 
-    if start_master:
-        launch_master(config_file, master_port, log_dir)
+    if protocol == 'hermes':
+        servers = get_servers(config_file)
+        for server in servers:
+            launch_server(server, master_port, log_dir, config_file, db_dir)
 
-    # partitions = getPartitionConfig(config_file)
+        if start_master:
+            launch_master(config_file, master_port, log_dir, db_dir)
+    elif protocol == 'cr':
+        partitions = getPartitionConfig(config_file)
+        servers = list(partitions.values())[0]
+        print(servers)
+        if start_master:
+            launch_master(config_file, master_port, log_dir, db_dir)
+        time.sleep(3)
+        for server in servers:
+            print(server)
+            launch_server(server[1], master_port, log_dir, config_file, db_dir)
+    else:
+        assert (0)
+
     # for _, servers in partitions.items():
     #     createChain(servers, master_port, log_dir, db_dir)
 
@@ -309,16 +324,18 @@ if __name__ == "__main__":
     if (args.protocol == 'hermes'):
         build_dir = top_dir + '/build/src'
         log_dir = top_dir + '/' + args.log_dir + '/hermes'
+        db_dir = log_dir + '/db/'
+        config_file = top_dir + '/' + args.config_file
     elif (args.protocol == 'cr'):
         build_dir = top_dir + '/../kv_store/bin'
         log_dir = top_dir + '/' + args.log_dir + '/cr'
+        db_dir = log_dir + '/db/'
+        config_file = top_dir + '/../kv_store/' + args.config_file
     else:
         assert(0)
 
     test_type = args.test_type
-    config_file = top_dir + '/' + args.config_file
     
-    db_dir = top_dir + '/db/'
     
     assert (not (args.only_clients and args.only_service))
 
@@ -328,7 +345,7 @@ if __name__ == "__main__":
 
     if (not args.only_clients):
         try:
-            createService(config_file, args.master_port, log_dir=log_dir, start_master=(not graceful_failure))
+            createService(args.protocol, config_file, args.master_port, log_dir=log_dir, db_dir=db_dir, start_master=(not graceful_failure))
         except Exception as e:
             print(f"An unexpected exception occured while starting service: {e}")
             terminateTest()

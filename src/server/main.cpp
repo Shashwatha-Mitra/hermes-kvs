@@ -8,6 +8,8 @@ ABSL_FLAG(uint32_t, id, 1, "Server id");
 ABSL_FLAG(uint32_t, port, 50050, "Port");
 ABSL_FLAG(std::string, log_dir, "", "log directory");
 ABSL_FLAG(std::string, config_file, "", "Config file");
+ABSL_FLAG(std::string, db_dir, "", "db directory");
+ABSL_FLAG(uint16_t, master_port, -1, "port of master node");
 
 std::atomic<bool> terminate_flag(false);
 
