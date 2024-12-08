@@ -44,6 +44,7 @@ message ValidateRequest {
 
 message MaydayRequest {
     required int32 node_id = 1;
+    required int32 epoch_id = 2;
 }
 
 message TerminateRequest {
@@ -61,4 +62,6 @@ service Hermes {
     rpc Validate(ValidateRequest) returns (Empty) {}
 
     rpc Mayday(MaydayRequest) returns (Empty) {}
+
+    rpc Heartbeat(Empty) returns (Empty) {}
 }

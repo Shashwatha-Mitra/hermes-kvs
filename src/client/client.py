@@ -3,6 +3,7 @@ from hermes_pb2 import *
 import grpc
 import random
 from logging import *
+import time
 
 class HermesClient(Hermes):
     def __init__(self, server_list: list, id=0):
@@ -34,7 +35,7 @@ class HermesClient(Hermes):
 
         while (retries > 0):
             random_server = random.randint(0, len(self._server_list)-1)
-            info(f'''[{self._id}]: 
+            debug(f'''[{self._id}]: 
                 Querying server: {self._server_list[random_server]}
                 op: {op}
                 key: {key}
@@ -52,6 +53,8 @@ class HermesClient(Hermes):
                 retries -= 1
                 if retries == 0:
                     raise e
+                # wait for sometime before retrying
+                time.sleep(1)
 
     def get(self, key, num_retries=None, retry_timeout=None):
         return self.access_service("get", key, "", num_retries, retry_timeout)

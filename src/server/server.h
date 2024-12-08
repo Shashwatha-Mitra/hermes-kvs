@@ -21,6 +21,8 @@
 
 #include "../utils/threadsafe_unordered_set.h"
 
+using map_iterator = typename std::unordered_map<std::string, std::unique_ptr<HermesValue>>::iterator;
+
 class HermesServiceImpl: public Hermes::Service {
 private:
     using InvalidateRespReader = typename std::unique_ptr<grpc::ClientAsyncResponseReader<InvalidateResponse>>;
@@ -61,7 +63,8 @@ private:
 
     void broadcast_invalidate(Timestamp &ts, const std::string &value, std::string &key, 
         grpc::CompletionQueue &cq, std::vector<uint32_t> &servers, 
-        std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs);
+
+    std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs, uint32_t epoch);
 
     void broadcast_validate(Timestamp ts, std::string key, std::vector<uint32_t> &servers, 
         std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs);
@@ -76,6 +79,26 @@ private:
 
     uint32_t addrToID(std::string& addr);
 
+    grpc::Status Invalidate(grpc::ServerContext *ctx, const InvalidateRequest *req, InvalidateResponse *resp) override;
+
+    grpc::Status Validate(grpc::ServerContext *ctx, const ValidateRequest *req, Empty *resp) override;
+
+    grpc::Status Mayday(grpc::ServerContext *ctx, const MaydayRequest *req, Empty *resp) override;
+
+    std::string get_tid();
+
+    void performWrite(HermesValue *hermes_val);
+
+    void performRead();
+
+    void performWriteReplay(HermesValue *hermes_val);
+
+    std::pair<bool, map_iterator> isKeyPresent(std::string key);
+
+    HermesValue* writeNewKey(std::string key, std::string value);
+
+    bool isCoordinator(HermesValue *hermes_val);
+
 public:
     HermesServiceImpl(uint32_t id, std::string &log_dir, const std::vector<std::string> &server_list, uint32_t port, std::atomic<bool>& terminate_flag);
 
@@ -83,13 +106,9 @@ public:
 
     grpc::Status Write(grpc::ServerContext *ctx, const WriteRequest *req, Empty *resp) override;
 
-    grpc::Status Invalidate(grpc::ServerContext *ctx, const InvalidateRequest *req, InvalidateResponse *resp) override;
-
-    grpc::Status Validate(grpc::ServerContext *ctx, const ValidateRequest *req, Empty *resp) override;
-
-    grpc::Status Mayday(grpc::ServerContext *ctx, const MaydayRequest *req, Empty *resp) override;
-
     grpc::Status Terminate(grpc::ServerContext *ctx, const TerminateRequest *req, Empty *resp) override;
+
+    grpc::Status Heartbeat(grpc::ServerContext *ctx, const Empty *req, Empty *resp) override;
 
     void terminate(bool graceful = true);
 

@@ -64,7 +64,8 @@ struct HermesValue {
     Timestamp timestamp;
     std::atomic<State> st;
 
-    HermesValue(const std::string &value, uint32_t node_id) {
+    HermesValue(const std::string &key, const std::string &value, uint32_t node_id) {
+        this->key = key;
         this->value = value;
         timestamp.node_id = node_id;
         timestamp.logical_time = 0;
@@ -92,21 +93,25 @@ struct HermesValue {
 
     // Helper function that waits till the condition variable is notified with an additional timeout
     // Timeout is in seconds
-    void wait_till_valid_or_timeout(uint32_t timeout) {
+    bool wait_till_valid_or_timeout(uint32_t timeout) {
         std::unique_lock<std::mutex> lock(stall_mutex);
         
         // Wait till the key is in VALID state or timeout occurs
-        stall_cv.wait_for(lock, std::chrono::seconds(timeout), [this] {return is_valid();});
+        // returns the latest value of is_valid(). If the wait completes due to key transitioning to valid 
+        // then the return value will be true else false
+        return stall_cv.wait_for(lock, std::chrono::seconds(timeout), [this] {return is_valid();});
+        //// Return true if no_timeout. This is used to determine whether to stall client request
+        //return status == std::cv_status::no_timeout;
     }
 
-    inline Timestamp coord_valid_to_write_transition(const std::string &new_value, uint32_t node_id) {
+    inline void coord_valid_to_write_transition(const std::string &new_value, uint32_t node_id) {
         std::unique_lock<std::mutex> lock(stall_mutex);
         State expected = VALID;
         st.compare_exchange_strong(expected, WRITE);
         timestamp.logical_time++;
         timestamp.node_id = node_id;
         value = new_value;
-        return timestamp;
+        //return timestamp;
     }
 
     bool is_lower(HermesTimestamp ts) {
@@ -161,5 +166,13 @@ struct HermesValue {
         State expected = INVALID;
         st.compare_exchange_strong(expected, VALID);
         stall_cv.notify_one();
+    }
+
+    inline Timestamp getTimestamp() {
+        return timestamp;
+    }
+
+    inline State getState() {
+        return st.load();
     }
 };

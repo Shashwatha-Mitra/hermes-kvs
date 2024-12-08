@@ -1,15 +1,14 @@
 #include <iostream>
 #include <atomic>
 #include <csignal>
-#include "server.h"
+#include "master.h"
 #include "../utils/config.h"
 
 ABSL_FLAG(uint32_t, id, 1, "Server id");
 ABSL_FLAG(uint32_t, port, 50050, "Port");
 ABSL_FLAG(std::string, log_dir, "", "log directory");
 ABSL_FLAG(std::string, config_file, "", "Config file");
-ABSL_FLAG(std::string, db_dir, "", "db directory");
-ABSL_FLAG(uint16_t, master_port, -1, "port of master node");
+ABSL_FLAG(std::string, db_dir, "", "directory to store the database");
 
 std::atomic<bool> terminate_flag(false);
 
@@ -31,12 +30,14 @@ int main(int argc, char** argv) {
     // Register signal handler
     //std::signal(SIGTERM, handle_sigterm);
 
-    HermesServiceImpl service(id, log_dir, server_list, port, terminate_flag);
+    Master master(id, log_dir, server_list);
+    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+    master.start();
 
-    grpc::ServerBuilder builder;
-    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-    builder.RegisterService(&service);
-    std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-    std::cout << "Server listening on " << server_address << std::endl;
-    server->Wait();
+    //grpc::ServerBuilder builder;
+    //builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    //builder.RegisterService(&service);
+    //std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+    //std::cout << "Server listening on " << server_address << std::endl;
+    //server->Wait();
 }
