@@ -6,6 +6,7 @@ import time
 import math
 
 max_key_length = 15
+time_interval = 0.1 # 100 ms
 def genRandomString (length):
     letters = string.ascii_lowercase
     return ''. join(random.choice(letters) for _ in range (length))
@@ -19,7 +20,7 @@ def getKeyNumber(skewFactor, num_keys_populated):
         return np.random.randint(freq_gp_size)
     return np.random.randint(freq_gp_size, num_keys_populated)
 
-def populateDB(client, num_keys, vk_ratio = 0):
+def populateDB(client, num_keys, vk_ratio = 0, failure=False):
     print("Populating DB..........")
     total_duration = 0
     num_write_failures = 0
@@ -48,7 +49,7 @@ def populateDB(client, num_keys, vk_ratio = 0):
         
         try:
             start = time.time_ns()
-            client.put(key, value)
+            client.put(key, value, failure)
             end = time.time_ns()
             time_in_us = (end - start)//1000
             total_duration += time_in_us
@@ -61,7 +62,7 @@ def populateDB(client, num_keys, vk_ratio = 0):
     print ("Populating DB Completed.........")
     return keys, values
     
-def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage = 10, skew = False, vk_ratio = 0):
+def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage = 10, skew = False, vk_ratio = 0, failure = False):
     print ("\nRunning Performance Tests...........\n")
     percentiles = [50, 70, 90, 99]
 
@@ -71,7 +72,7 @@ def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage 
     if len(values) == 0:
         values = [f"VAL{str(i).zfill(length)}" for i in range (num_keys)]
 
-    num_ops = len(keys)
+    num_ops = 10*len(keys)
     num_keys_populated = len(keys)
     num_read_failures = 0
     num_write_failures = 0
@@ -79,6 +80,7 @@ def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage 
     write_times = []
     read_failure_keys = []
     write_failure_keys = []
+    op_times = []
     
     print (f"Num_ops = {num_ops}, num_keys_populated = {num_keys_populated}")
     expt_start = time.time_ns()
@@ -104,18 +106,20 @@ def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage 
                 # Perform put operation on a random value generated on the fly
                 value = genRandomString (value_len)
                 start = time.time_ns()
-                client.put(key, value)
+                client.put(key, value, failure)
                 end = time.time_ns()
                 time_in_us = int((end - start)/1000)
                 write_times.append(time_in_us)
+                op_times.append(time_in_us)
 
             else:
                 # Get the value for key
                 start = time.time_ns()
-                value = client.get(key)
+                value = client.get(key, failure)
                 end = time.time_ns()
+                time_in_us = int((end - start)/1000)
+                op_times.append(time_in_us)
                 if (value != '' and value != 'Key not found'):
-                    time_in_us = int((end - start)/1000)
                     read_times.append(time_in_us)
                 elif (value == 'Key not found'):
                     num_read_failures += 1
@@ -154,7 +158,8 @@ def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage 
     for i in percentiles:
         if len(read_times) > 0:
             read_idx = int ((i * (len(read_times)-1))/100)
-            print (f"{i}th percentile read latency: {read_times[read_idx]}")
+            read_thruput = (len(read_times) * 1000)/read_times[read_idx]
+            print (f"{i}th percentile read latency: {read_times[read_idx]}, throughput: {read_thruput:.2f}")
     
     print ('................................')    
     
@@ -163,12 +168,31 @@ def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage 
     for i in percentiles:
         if len(write_times) > 0:
             write_idx = int ((i * (len(write_times) - 1))/100)
-            print (f"{i}th percentile write latency: {write_times[write_idx]}")
+            write_thruput = (len(write_times)*1000)/write_times[write_idx]
+            print (f"{i}th percentile write latency: {write_times[write_idx]}, throughput: {write_thruput:.2f}")
     
     print ('................................')
     print (f"Throughput = {throughput:.2f}")
     print ('................................')
     print ('Failed Keys')
     print (f'Read Failures: {read_failure_keys}')
-    print (f'Write Failures: {write_failure_keys}')
+    print (f'Write Failures: {write_failure_keys}\n')
+
+    if (failure):
+        num_ops = 0
+        curr_time = 0
+        time_p = 0
+        # time_v_throughput = []
+        for t in op_times:
+            curr_time += t
+            num_ops += 1
+            if (curr_time > (time_interval * 1000 * 1000)):
+                throughput = (num_ops * 1000 * 1000)/(curr_time)
+                time_p += curr_time
+                # time_v_throughput.append((round(time_p/1000, 2), round(throughput, 2)))
+                print (f'{round(time_p/1000,2)} {round(throughput, 2)}')
+                curr_time = 0
+                num_ops = 0
+        # print (time_v_throughput)
+
     print ("\nEnding Performance Tests.................") 

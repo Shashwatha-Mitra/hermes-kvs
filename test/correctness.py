@@ -11,7 +11,7 @@ def performRead(client, key, correct_value, fake):
                 
     try: 
         start = time.time_ns()
-        value = client.get(key)
+        value = client.get(key, False)
         end = time.time_ns()
         duration = (end - start)
 

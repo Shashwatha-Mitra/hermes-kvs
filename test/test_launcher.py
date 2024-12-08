@@ -134,6 +134,7 @@ def createService(protocol, config_file, master_port, log_dir='', db_dir='', sta
     else:
         assert (0)
 
+    return servers
     # for _, servers in partitions.items():
     #     createChain(servers, master_port, log_dir, db_dir)
 
@@ -183,16 +184,15 @@ def startClients(args):
 
         print(f"Starting client {client_id}")
         print(cmd)
-        log_file = log_dir + f'client_{client_id}.log'
+        log_file = log_dir + '/' + f'client_{client_id}.log'
 
         with open(log_file, 'w') as f:
             process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f)
             client_processes.append(process)
         
-        if (client_id == 0):
+        if ((client_id == 0 and args.num_clients > 1) or args.test_type == 'failure'):
             print (f'Waiting for client {client_id} to finish populate')
             time.sleep(20)    
-        
 
     #manualKillServers()
 
@@ -251,18 +251,20 @@ def startKiller(config_file, clean=1, strategy='random'):
         process = subprocess.Popen(killer_process_cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
         return process
 
-def manualKillServers(server_id, wait_time = 1):
-    time.sleep(wait_time)
+def manualKillServers(server_list, wait_time = 1):
     global server_processes
-    assert(server_id in server_processes.keys())
-    node = server_processes[server_id]
-    print (f'Killing server {server_id}')
+    print (server_list)
+    for server_id in server_list:
+        assert(server_id in server_processes.keys())
+        node = server_processes[server_id]
+        print (f'Killing server {server_id}')
 
-    if (node != None):
-        terminateProcess(node)
-        del server_processes[server_id]
-    else:
-        print ('Cannot remove a non-existing process')
+        if (node != None):
+            terminateProcess(node)
+            del server_processes[server_id]
+        else:
+            print ('Cannot remove a non-existing process')
+        time.sleep(wait_time)
 
 def monitor_cpu_utilization(processes, output_csv, sampling_rate=1, duration=30, stop_event=None):
     """
@@ -356,16 +358,16 @@ if __name__ == "__main__":
 
     test_type = args.test_type
     
-    
     assert (not (args.only_clients and args.only_service))
 
     checkAndMakeDir(log_dir)
 
     graceful_failure = False
+    server_list = []
 
     if (not args.only_clients):
         try:
-            createService(args.protocol, config_file, args.master_port, log_dir=log_dir, db_dir=db_dir, start_master=(not graceful_failure))
+            server_list = createService(args.protocol, config_file, args.master_port, log_dir=log_dir, db_dir=db_dir, start_master=(not graceful_failure))
         except Exception as e:
             print(f"An unexpected exception occured while starting service: {e}")
             terminateTest()
@@ -373,9 +375,9 @@ if __name__ == "__main__":
  #       time.sleep(30)
 
     # startLoadMeasurement(log_dir, master_processes, server_processes)
-    cpu_utilization_csv = log_dir + '/cpu_utilization.csv'
-    monitor_cpu_utilization_thread = threading.Thread(target=monitor_cpu_utilization, args=(server_processes, cpu_utilization_csv, 0.01, 5, monitor_stop_event,))
-    monitor_cpu_utilization_thread.start()
+    # cpu_utilization_csv = log_dir + '/cpu_utilization.csv'
+    # monitor_cpu_utilization_thread = threading.Thread(target=monitor_cpu_utilization, args=(server_processes, cpu_utilization_csv, 0.01, 5, monitor_stop_event,))
+    # monitor_cpu_utilization_thread.start()
 
     if (not args.only_service):
         try:
@@ -384,11 +386,11 @@ if __name__ == "__main__":
             print(f"An unexpected exception occured while starting clients: {e}")
             terminateTest()
 
-    # if args.test_type == 'availability':
-    #manualKillServers(0)
-    #if not graceful_failure:
-    #    kill_server_thread = threading.Thread(target=manualKillServers, args=('50052',6,))
-    #    kill_server_thread.start()
+    # if args.test_type == 'failure':
+        # manualKillServers()
+    if not graceful_failure:
+        kill_server_thread = threading.Thread(target=manualKillServers, args=(server_list[:2],8,))
+        kill_server_thread.start()
 
     # time.sleep(5)
     # startServer([10, 5450], 50000, log_dir, db_dir)
@@ -403,8 +405,8 @@ if __name__ == "__main__":
     print("Test finished. Terminating service")
     # wait for sometime to flush the stdout buffers to the log file
     time.sleep(2)
-    monitor_stop_event.set()
-    monitor_cpu_utilization_thread.join()
+    # monitor_stop_event.set()
+    # monitor_cpu_utilization_thread.join()
     #kill_server_thread.join()
     terminateService()
     # for process in load_measurement_processes:

@@ -36,7 +36,7 @@ Master::Master(uint32_t id, std::string &log_dir,
 
 void Master::start() {
     while (true) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
         sendHeartbeats();
     }
 }
@@ -72,7 +72,7 @@ void Master::sendHeartbeats() {
     // Send heartbeats and detect failed servers
     for (auto server: active_servers) {
         auto& stub = _stubs[server];
-        auto deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(500);
+        auto deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(150);
         grpc::ClientContext ctx;
         ctx.set_deadline(deadline);
         Empty req;

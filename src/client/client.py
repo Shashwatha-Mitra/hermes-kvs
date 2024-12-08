@@ -14,10 +14,10 @@ class HermesClient(Hermes):
             channel = grpc.insecure_channel(server)
             self._stubs.append(HermesStub(channel))
 
-        self.RETRY_TIMEOUT = 1 # 1 second
-        self.NUM_RETRIES = 3
+        self.RETRY_TIMEOUT = 2 # 2 seconds
+        self.NUM_RETRIES = 7
 
-    def access_service(self, op, key, value, num_retries, retry_timeout):
+    def access_service(self, op, key, value, num_retries, retry_timeout, failure):
         assert(op=="get" or op=="put")
 
         if num_retries:
@@ -33,8 +33,11 @@ class HermesClient(Hermes):
         if op == "put":
             assert(value)
 
+        # Pick a random server to ping
+        random_server = random.randint(0,len(self._server_list)-1)
         while (retries > 0):
-            random_server = random.randint(0, len(self._server_list)-1)
+            # Pick a random server first
+            # random_server = random.randint(0, len(self._server_list)-1)
             debug(f'''[{self._id}]: 
                 Querying server: {self._server_list[random_server]}
                 op: {op}
@@ -51,16 +54,22 @@ class HermesClient(Hermes):
                     return
             except Exception as e:
                 retries -= 1
+
+                if (failure):
+                    random_server = ((random_server + 1) % len(self._server_list))
+                else: 
+                    random_server = random.randint(0,len(self._server_list)-1)
                 if retries == 0:
                     raise e
+
                 # wait for sometime before retrying
                 time.sleep(1)
 
-    def get(self, key, num_retries=None, retry_timeout=None):
-        return self.access_service("get", key, "", num_retries, retry_timeout)
+    def get(self, key, failure=False, num_retries=None, retry_timeout=None):
+        return self.access_service("get", key, "", num_retries, retry_timeout, failure)
 
-    def put(self, key, value, num_retries=None, retry_timeout=None):
-        self.access_service("put", key, value, num_retries, retry_timeout)
+    def put(self, key, value, num_retries=None, retry_timeout=None, failure=False):
+        self.access_service("put", key, value, num_retries, retry_timeout, failure)
 
     def terminate(self, server_id, graceful=True, timeout=10):
         info(f"[{self._id}]: terminating server: {self._server_list[server_id]}")

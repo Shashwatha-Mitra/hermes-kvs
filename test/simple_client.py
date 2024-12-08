@@ -36,7 +36,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if (args.top_dir):
-        top_dir = args.top_dir
+        top_dir = args.top_dir + '/'
     else:
         top_dir = '../'
 
@@ -49,6 +49,7 @@ if __name__ == "__main__":
     config_file = top_dir + args.config_file
     num_keys = args.num_keys
     write_per = args.write_percentage
+    # print (test_type + ' ' + args.config_file + ' ' + config_file)
    
     server_list = parseConfigFile(config_file)
     
@@ -76,9 +77,7 @@ if __name__ == "__main__":
         values = []
         if (client_id == 0):
             keys, values = performance_test.populateDB(cl, num_keys, args.vk_ratio)
-            logging.warning("Populate done!")
-        if (client_id == 1):
-            fail.terminate(cl, True)         
+            logging.warning("Populate done!") 
         logging.warning("Starting Failure Perf tests")
-        performance_test.performanceTest(cl, num_keys, keys, values, write_per, args.skew, args.vk_ratio)
+        performance_test.performanceTest(cl, num_keys, keys, values, write_per, args.skew, args.vk_ratio, True)
         logging.warning("Client {client_id} ended Failure Perf tests")

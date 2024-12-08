@@ -34,7 +34,7 @@ def populateDB(client, num_keys=10):
         # Try inserting key into the database
         try:
             start = time.time_ns()        # Record start time
-            client.put(key, value)
+            client.put(key, value, False)
             end = time.time_ns()          # Record end time
 
             # if (status == -1):
