@@ -3,6 +3,8 @@
 
 #include "hermes.grpc.pb.h"
 #include "state.h"
+#include "wal.h"
+#include "thread_pool.h"
 
 #include <vector>
 #include <shared_mutex>
@@ -98,8 +100,16 @@ private:
 
     bool isCoordinator(HermesValue *hermes_val);
 
+    void log_append(const std::string *key, const std::string *value, std::atomic_bool *done, 
+        std::condition_variable *cv, std::mutex *mutex);
+
+    std::unique_ptr<StorageHelper> storage_helper;
+
+    std::unique_ptr<ThreadPool> thread_pool;
+
 public:
-    HermesServiceImpl(uint32_t id, std::string &log_dir, const std::vector<std::string> &server_list, uint32_t port, std::atomic<bool>& terminate_flag);
+    HermesServiceImpl(uint32_t id, std::string &log_dir, const std::vector<std::string> &server_list, uint32_t port, 
+            std::atomic<bool>& terminate_flag, std::string &db_dir);
 
     grpc::Status Read(grpc::ServerContext *ctx, const ReadRequest *req, ReadResponse *resp) override;
 
@@ -113,24 +123,3 @@ public:
 
     virtual ~HermesServiceImpl();
 };
-
-// ABSL_FLAG(uint32_t, id, 1, "Server id");
-// ABSL_FLAG(uint32_t, port, 50050, "Port");
-// ABSL_FLAG(std::string, log_dir, "", "log directory");
-
-// int main(int argc, char** argv) {
-//     absl::ParseCommandLine(argc, argv);
-//     uint32_t id = absl::GetFlag(FLAGS_id);
-//     uint32_t port = absl::GetFlag(FLAGS_port);
-//     std::string log_dir = absl::GetFlag(FLAGS_log_dir);
-//     std::string server_address("localhost:" + std::to_string(port));
-
-//     HermesServiceImpl service(id, log_dir);
-
-//     grpc::ServerBuilder builder;
-//     builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-//     builder.RegisterService(&service);
-//     std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-//     std::cout << "Server listening on " << server_address << std::endl;
-//     server->Wait();
-// }

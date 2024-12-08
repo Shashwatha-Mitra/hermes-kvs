@@ -69,6 +69,10 @@ target_link_libraries(hermes_grpc_proto
 add_executable(server 
   server/main.cpp
   server/server.cpp
+  server/wal.h
+  server/wal.cpp
+  server/thread_pool.h
+  server/thread_pool.cpp
   utils/threadsafe_unordered_set.h
   )
 # add_executable(client client.cpp)
@@ -80,7 +84,8 @@ target_link_libraries(server
     #  absl::log_initialize
     # absl::log_globals
     gRPC::grpc++
-    protobuf    
+    protobuf
+    rocksdb
 )
 # target_link_libraries(client 
 #     hermes_grpc_proto

@@ -25,7 +25,7 @@ std::unique_ptr<Hermes::Stub> create_stub(const std::string &addr) {
 HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir, 
         const std::vector<std::string> &server_list,
         uint32_t port,
-        std::atomic<bool>& terminate_flag)
+        std::atomic<bool>& terminate_flag, std::string &db_dir)
         : server_id(id), epoch(0) {
     // Logger initialization
     std::string log_file_name = log_dir + "spdlog_server_" + std::to_string(id) + ".log";
@@ -51,6 +51,11 @@ HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir,
         _stubs[other_id] = create_stub(server);
         //_stubs.insert(create_stub(server));
     }
+    std::string db_path = db_dir + "/db_" + std::to_string(server_id);
+    std::string log_prefix = log_dir + "/hermes_wal_" + std::to_string(server_id) + "_";
+    storage_helper = std::make_unique<StorageHelper>(log_dir, db_path, logger);
+
+    thread_pool = std::make_unique<ThreadPool>(4);
 
     dead.store(false);
 }
@@ -127,12 +132,12 @@ void HermesServiceImpl::performWrite(HermesValue *hermes_val) {
     invalidate and wrong ts might be propragated in an invalidate RPC
     */
     auto write_ts = hermes_val->getTimestamp(); //coord_valid_to_write_transition(value, server_id);
-    // } else {
-    //     SPDLOG_LOGGER_CRITICAL(logger, "Compare and Swap failed!!. Value still in VALID state.");
-    // }
 
     std::string key = hermes_val->key;
     std::string value = hermes_val->value;
+    std::atomic_bool persist_done {false};
+    std::condition_variable persist_cv;
+    std::mutex persist_mutex;
 
     while (true) {
         std::vector<uint32_t> current_active_servers;
@@ -154,12 +159,8 @@ void HermesServiceImpl::performWrite(HermesValue *hermes_val) {
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end-start).count();
         SPDLOG_LOGGER_TRACE (logger, "Took {} us to create grpc stubs", duration);
         broadcast_invalidate(write_ts, value, key, broadcast_queue, current_active_servers, server_stubs, current_epoch);
-
-        //// To test write replay
-        //if (server_id == 50052) {
-        //    terminate();
-        //    return;
-        //}
+        thread_pool->enqueue(std::bind(&HermesServiceImpl::log_append, this, &key, &value, 
+            &persist_done, &persist_cv, &persist_mutex));
 
         // Check if the write was interrupted by a higher priority write
         if (!hermes_val->is_write()) {
@@ -192,6 +193,12 @@ void HermesServiceImpl::performWrite(HermesValue *hermes_val) {
             // backoff
             //std::this_thread::sleep_for(std::chrono::seconds(1));
         }
+    }
+    
+    {
+        // Wait till the WAL is persisted
+        std::unique_lock<std::mutex> persist_lock {persist_mutex};
+        persist_cv.wait(persist_lock, [&persist_done]{return persist_done == true;});
     }
 }
 
@@ -390,21 +397,13 @@ void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key, std::v
         std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs) {
     grpc::CompletionQueue cq;
     SPDLOG_LOGGER_INFO(logger, "[{}]::Broadcasting VALIDATE RPCs", get_tid());
-    //int num_other_servers = _stubs.size();
 
     HermesTimestamp grpc_ts = ts.get_grpc_timestamp();
-
-    // Get the list of currently active servers in the cluster
-    // std::unordered_set<uint32_t> active_servers = _active_servers.copy();
-
-    // Expect acks from all the active servers. If a server goes down, this set is updated in the mayday RPC
-    // pending_acks = ThreadSafeUnorderedSet<uint32_t> {active_servers};
 
     //for (auto& stub: _stubs) {
     uint64_t i = 0;
     for (auto& server: servers) {
         SPDLOG_LOGGER_TRACE(logger, "[{}]::sending VALIDATE to node_id: {}, for key {}", get_tid(), server, key);
-        // auto& stub = _stubs[server];
         ValidateRequest req;
         req.set_key(key);
         req.set_allocated_ts(&grpc_ts);
@@ -486,6 +485,17 @@ grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const Validat
         // Timestamp is not equal to local timestamp, which means a request with higher timestamp must 
         // have been accepted. Ignore
         return grpc::Status::OK;
+    }
+    std::atomic_bool persist_done {false};
+    std::condition_variable persist_cv;
+    std::mutex persist_mutex;
+    thread_pool->enqueue(std::bind(&HermesServiceImpl::log_append, this, &key, &hermes_val->value,
+            &persist_done, &persist_cv, &persist_mutex));
+
+    {
+        // Wait till the WAL is persisted
+        std::unique_lock<std::mutex> persist_lock {persist_mutex};
+        persist_cv.wait(persist_lock, [&persist_done]{return persist_done == true;});
     }
     hermes_val->fol_invalid_to_valid_transition();
     SPDLOG_LOGGER_DEBUG(logger, "Validated key after write");
@@ -589,4 +599,12 @@ void HermesServiceImpl::terminate(bool graceful) {
 
 grpc::Status HermesServiceImpl::Heartbeat(grpc::ServerContext *ctx, const Empty *req, Empty *resp) {
     return grpc::Status::OK;
+}
+
+void HermesServiceImpl::log_append(const std::string *key, const std::string *value, std::atomic_bool *done, 
+        std::condition_variable *cv, std::mutex *mutex) {
+    std::unique_lock<std::mutex> persist_lock {*mutex};
+    storage_helper->write_log(key, value);
+    done->store(true);
+    cv->notify_one();
 }
