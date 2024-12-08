@@ -98,9 +98,22 @@ def launch_master(config_file, port, log_dir, db_dir):
 def createService(protocol, config_file, master_port, log_dir='', db_dir='', start_master=True):
     #TODO: start the manager before creating chains
 
-    #time.sleep(5)
-    print (log_dir)
+<<<<<<< HEAD
+    # if master_port:
+    #     cmd = build_dir + 'master'
+    #     cmd += ' ' + f'--db_dir={db_dir}'
+    #     cmd += ' ' + f'--config_path={config_file}'
+    #     cmd += ' ' + f'--log_dir={log_dir}'
+        
+    #     print(f"Starting master")
+    #     print(cmd)
+    #     log_file = log_dir + f'master.log'
 
+    #     global master_processes
+
+    #     with open(log_file, 'w') as f:
+    #         process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
+    #         master_processes.append(process)
     if protocol == 'hermes':
         servers = get_servers(config_file)
         for server in servers:
@@ -108,6 +121,7 @@ def createService(protocol, config_file, master_port, log_dir='', db_dir='', sta
 
         if start_master:
             launch_master(config_file, master_port, log_dir, db_dir)
+
     elif protocol == 'cr':
         partitions = getPartitionConfig(config_file)
         servers = list(partitions.values())[0]
@@ -156,10 +170,11 @@ def startClients(args):
         cmd = 'python3 simple_client.py'
         cmd += ' ' + f'--id={client_id}'
         cmd += ' ' + f'--config-file={args.config_file}'
-#        cmd += ' ' + f'--test-type={args.test_type}'
-#        cmd += ' ' + f'--top-dir={args.top_dir}'
+        cmd += ' ' + f'--test-type={args.test_type}'
+        cmd += ' ' + f'--top-dir={args.top_dir}'
         cmd += ' ' + f'--log-dir={args.log_dir}'
-#        cmd += ' ' + f'--num-keys={args.num_keys}'
+        cmd += ' ' + f'--num-keys={args.num_keys}'
+        cmd += ' ' + f'--write-percentage={args.write_percentage}'
         
         if (args.vk_ratio != 0):  
             cmd += ' ' + f'--vk_ratio={args.vk_ratio}'
@@ -174,6 +189,12 @@ def startClients(args):
         with open(log_file, 'w') as f:
             process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f)
             client_processes.append(process)
+        
+        if (client_id == 0):
+            print (f'Waiting for client {client_id} to finish populate')
+            time.sleep(20)    
+        
+
     #manualKillServers()
 
 
@@ -303,16 +324,16 @@ if __name__ == "__main__":
     parser.add_argument('--config-file', type=str, default='test_config.txt', help='chain configuration file')
 #    parser.add_argument('--eeal-fname', type=str, default='real')
 #    parser.add_argument('--fake-fname', type=str, default='fake')
-    parser.add_argument('--test-type', type=str, default='sanity', help='sanity, correctness, crash_consistency, perf, availability')
-    parser.add_argument('--top-dir', type=str, default='..', help='path to top dir')
-    parser.add_argument('--log-dir', type=str, default='out', help='path to log dir')
+    parser.add_argument('--test-type', type=str, default='sanity', help='sanity, correctness, crash_consistency, perf, availability, failure')
+    parser.add_argument('--top-dir', type=str, default='../', help='path to top dir')
+    parser.add_argument('--log-dir', type=str, default='out/', help='path to log dir')
     parser.add_argument('--num-clients', type=int, default=1, help='number of clients')
     parser.add_argument('--master-port', type=str, default='60060', help='master port')
     parser.add_argument('--skew', action='store_true')
     parser.add_argument('--vk_ratio', type=int, default=0, help='ratio of value to key lenght')
     parser.add_argument('--num-keys', type=int, default=1000, help='number of gets to put and get in sanity test')
+    parser.add_argument('--write-percentage', type=int, default=0, help='write percentage for performance tests')
     parser.add_argument('--protocol', type=str, default='hermes', help="replication protocol - hermes or cr")
-
 
     parser.add_argument('--only-clients', action='store_true')
     parser.add_argument('--only-service', action='store_true')

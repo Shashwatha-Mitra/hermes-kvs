@@ -63,7 +63,8 @@ private:
 
     void broadcast_invalidate(Timestamp &ts, const std::string &value, std::string &key, 
         grpc::CompletionQueue &cq, std::vector<uint32_t> &servers, 
-        std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs, uint32_t epoch);
+
+    std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs, uint32_t epoch);
 
     void broadcast_validate(Timestamp ts, std::string key, std::vector<uint32_t> &servers, 
         std::vector<std::unique_ptr<Hermes::Stub>> &server_stubs);

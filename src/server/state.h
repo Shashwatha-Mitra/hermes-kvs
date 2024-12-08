@@ -79,6 +79,17 @@ struct HermesValue {
         // Wait till the key is in VALID state
         stall_cv.wait(lock, [this] {return is_valid();});
     }
+    
+    std::string state_to_string() {
+        State curr_state = st.load(std::memory_order_acquire);
+        if (curr_state == VALID)
+            return "VALID";
+        else if (curr_state == WRITE)   
+            return "WRITE";
+        else if (curr_state == INVALID)
+            return "INVALID";
+        return "REPLAY";
+    }
 
     // Helper function that waits till the condition variable is notified with an additional timeout
     // Timeout is in seconds

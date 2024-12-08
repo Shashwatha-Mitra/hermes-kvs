@@ -248,7 +248,6 @@ grpc::Status HermesServiceImpl::Read(grpc::ServerContext *ctx,
             resp->set_value(not_found);
             return grpc::Status::OK;
         }
-
     }
     return grpc::Status(grpc::StatusCode::UNAVAILABLE, "server is down");
 }
@@ -367,7 +366,7 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, s
                 // pending_acks.erase(responder);
                 acks_received++;
                 if (grpc_tag->response.accept()) {
-                    SPDLOG_LOGGER_TRACE(logger, "Invalidate accepted");
+                    SPDLOG_LOGGER_TRACE(logger, "Invalidate accepted from {} for key {}", responder, key);
                     acceptances_received++;
                 }
                 if (acks_received == num_servers) {
@@ -424,7 +423,7 @@ void HermesServiceImpl::broadcast_validate(Timestamp ts, std::string key, std::v
 // Invalidate handling via gRPC
 grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, const InvalidateRequest *req, InvalidateResponse *resp) {
     HermesTimestamp ts = req->ts();
-    SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC from node_id: {}", Timestamp(ts).node_id);
+    SPDLOG_LOGGER_INFO(logger, "Received Invalidate RPC from node_id: {} for key {}", Timestamp(ts).node_id, req->key());
     if (req->epoch_id() != epoch) {
         // Epoch id doesnt match. Reject request
         SPDLOG_LOGGER_DEBUG(logger, "Rejecting invalidate request because received epoch_id {} doesn't match with local epoch id {}", req->epoch_id(), epoch);
@@ -451,7 +450,7 @@ grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, const Inval
         return grpc::Status::OK;
     }
     hermes_val->fol_invalidate(value, ts);
-    SPDLOG_LOGGER_INFO(logger, "Accepting Invalidate RPC");
+    SPDLOG_LOGGER_INFO(logger, "Accepting Invalidate RPC for key {}", req->key());
     resp->set_accept(true);
 
     // Send the node_id so that the receiver knows which node send the ack
@@ -478,7 +477,7 @@ grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, const Inval
 // Called by co-ordinator to validate the current key.
 grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const ValidateRequest *req, Empty *resp) {
     auto& ts = req->ts();
-    SPDLOG_LOGGER_INFO(logger, "Received validate RPC from node_id: {}", Timestamp(ts).node_id);
+    SPDLOG_LOGGER_INFO(logger, "Received validate RPC from node_id: {} for key {}", Timestamp(ts).node_id, req->key());
     auto& key = req->key();
     HermesValue* hermes_val = key_value_map.find(req->key())->second.get();
     // SPDLOG_LOGGER_DEBUG(logger, )
@@ -488,7 +487,7 @@ grpc::Status HermesServiceImpl::Validate(grpc::ServerContext *ctx, const Validat
         return grpc::Status::OK;
     }
     hermes_val->fol_invalid_to_valid_transition();
-    SPDLOG_LOGGER_DEBUG(logger, "Validated key after write");
+    SPDLOG_LOGGER_DEBUG(logger, "Validated key {} after write", key);
     return grpc::Status::OK;
 }
 
