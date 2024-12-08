@@ -158,7 +158,7 @@ def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage 
     for i in percentiles:
         if len(read_times) > 0:
             read_idx = int ((i * (len(read_times)-1))/100)
-            read_thruput = (len(read_times) * 1000)/read_times[read_idx]
+            read_thruput = (1000 * 1000)/read_times[read_idx]
             print (f"{i}th percentile read latency: {read_times[read_idx]}, throughput: {read_thruput:.2f}")
     
     print ('................................')    
@@ -168,7 +168,7 @@ def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage 
     for i in percentiles:
         if len(write_times) > 0:
             write_idx = int ((i * (len(write_times) - 1))/100)
-            write_thruput = (len(write_times)*1000)/write_times[write_idx]
+            write_thruput = (1000 * 1000)/write_times[write_idx]
             print (f"{i}th percentile write latency: {write_times[write_idx]}, throughput: {write_thruput:.2f}")
     
     print ('................................')
