@@ -98,7 +98,6 @@ def launch_master(config_file, port, log_dir, db_dir):
 def createService(protocol, config_file, master_port, log_dir='', db_dir='', start_master=True):
     #TODO: start the manager before creating chains
 
-<<<<<<< HEAD
     # if master_port:
     #     cmd = build_dir + 'master'
     #     cmd += ' ' + f'--db_dir={db_dir}'
@@ -325,8 +324,8 @@ if __name__ == "__main__":
 #    parser.add_argument('--eeal-fname', type=str, default='real')
 #    parser.add_argument('--fake-fname', type=str, default='fake')
     parser.add_argument('--test-type', type=str, default='sanity', help='sanity, correctness, crash_consistency, perf, availability, failure')
-    parser.add_argument('--top-dir', type=str, default='../', help='path to top dir')
-    parser.add_argument('--log-dir', type=str, default='out/', help='path to log dir')
+    parser.add_argument('--top-dir', type=str, default='..', help='path to top dir')
+    parser.add_argument('--log-dir', type=str, default='out', help='path to log dir')
     parser.add_argument('--num-clients', type=int, default=1, help='number of clients')
     parser.add_argument('--master-port', type=str, default='60060', help='master port')
     parser.add_argument('--skew', action='store_true')
