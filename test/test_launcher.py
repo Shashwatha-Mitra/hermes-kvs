@@ -19,7 +19,7 @@ log_dir = ''
 load_measurement_processes = []
 master_processes = {}
 server_processes = {}
-client_processes = []
+client_processes = {}
 
 monitor_stop_event = threading.Event()
 
@@ -141,9 +141,13 @@ def createService(protocol, config_file, master_port, log_dir='', db_dir='', sta
 def terminateProcess(process):
     pid = process.pid
     try:
-        os.killpg(os.getpgid(pid), signal.SIGTERM)
-        process.wait()
-        print(f"Sent SIGTERM signal to process {pid}")
+        psutil_process = psutil.Process(pid)
+        if psutil_process.is_running():
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+            process.wait()
+            print(f"Sent SIGTERM signal to process {pid}")
+        else:
+            print(f"process {pid} doesn't exist")
     except OSError:
         print(f"Failed to send SIGTERM signal to process {pid}")
 
@@ -161,46 +165,69 @@ def terminateService():
     terminateMaster()
     terminateServers()
 
+def terminateAllProcesses():
+    terminateClients()
+    terminateService()
+
+def getClientCmd(args, client_id, populate_db):
+    cmd = 'python3 simple_client.py'
+    cmd += ' ' + f'--id={client_id}'
+    cmd += ' ' + f'--config-file={args.config_file}'
+    cmd += ' ' + f'--test-type={args.test_type}'
+    cmd += ' ' + f'--top-dir={args.top_dir}'
+    cmd += ' ' + f'--log-dir={args.log_dir}'
+    cmd += ' ' + f'--num-keys={args.num_keys}'
+    cmd += ' ' + f'--write-percentage={args.write_percentage}'
+
+    if populate_db:
+        cmd += ' ' + f'--populate-db'
+    
+    if (args.vk_ratio != 0):  
+        cmd += ' ' + f'--vk_ratio={args.vk_ratio}'
+
+    if (args.skew):
+        cmd += ' ' + f'--skew'
+
+    return cmd
+
+def startClient(args, client_id, populate_db=False):
+    cmd = getClientCmd(args, client_id, populate_db)
+#    real_fname = args.real_fname + str(client_id) + '.csv'
+#    fake_fname = args.fake_fname + str(client_id) + '.csv'
+    
+    print(f"Starting client {client_id}")
+    print(cmd)
+    log_file = log_dir + '/' + f'client_{client_id}.log'
+
+    with open(log_file, 'w') as f:
+        process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f)
+        return process
 
 def startClients(args):
     for client_id in range(args.num_clients):
-#        real_fname = args.real_fname + str(client_id) + '.csv'
-#        fake_fname = args.fake_fname + str(client_id) + '.csv'
+        process = startClient(args, client_id)
+        client_processes[client_id] = process
         
-        cmd = 'python3 simple_client.py'
-        cmd += ' ' + f'--id={client_id}'
-        cmd += ' ' + f'--config-file={args.config_file}'
-        cmd += ' ' + f'--test-type={args.test_type}'
-        cmd += ' ' + f'--top-dir={args.top_dir}'
-        cmd += ' ' + f'--log-dir={args.log_dir}'
-        cmd += ' ' + f'--num-keys={args.num_keys}'
-        cmd += ' ' + f'--write-percentage={args.write_percentage}'
-        
-        if (args.vk_ratio != 0):  
-            cmd += ' ' + f'--vk_ratio={args.vk_ratio}'
-
-        if (args.skew):
-            cmd += ' ' + f'--skew'
-
-        print(f"Starting client {client_id}")
-        print(cmd)
-        log_file = log_dir + '/' + f'client_{client_id}.log'
-
-        with open(log_file, 'w') as f:
-            process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f)
-            client_processes.append(process)
-        
-        if ((client_id == 0 and args.num_clients > 1) or args.test_type == 'failure'):
-            print (f'Waiting for client {client_id} to finish populate')
-            time.sleep(20)    
-
-    #manualKillServers()
-
+        #if ((client_id == 0 and args.num_clients > 1) or args.test_type == 'failure'):
+        #    print (f'Waiting for client {client_id} to finish populate')
+        #    time.sleep(20)    
 
 def terminateClients():
+    print("Terminating Clients")
     global client_processes
-    for process in client_processes:
-        terminateProcess(process)
+    try:
+        for client, process in client_processes.items():
+            if (process):
+                print(f"Terminating client {client}")
+                print(process)
+                terminateProcess(process)
+                print(f"Deleting from dictionary")
+                del client_processes[client]
+            else:
+                print("Cannot remove a non-existing process")
+    except Exception as e:
+        terminateAllProcesses()
+        raise e
 
 def terminateTest():
     for process in load_measurement_processes:
@@ -210,7 +237,7 @@ def terminateTest():
     sys.exit(1)   
 
 def waitToFinish():
-    for process in client_processes:
+    for _, process in client_processes.items():
         process.wait()
 
 def checkAndMakeDir(path):
@@ -338,6 +365,8 @@ if __name__ == "__main__":
 
     parser.add_argument('--only-clients', action='store_true')
     parser.add_argument('--only-service', action='store_true')
+    parser.add_argument('--populate-db', action='store_true')
+    parser.add_argument('--measure-cpu-utilization', action='store_true')
 
     args = parser.parse_args()
     
@@ -372,12 +401,16 @@ if __name__ == "__main__":
             print(f"An unexpected exception occured while starting service: {e}")
             terminateTest()
             
- #       time.sleep(30)
+    if args.populate_db:
+        client_id = 0
+        populate_db_client_process = startClient(args, client_id, populate_db=True) # pass client_id as 0
+        populate_db_client_process.wait()
+        print("completed populate DB")
 
-    # startLoadMeasurement(log_dir, master_processes, server_processes)
-    # cpu_utilization_csv = log_dir + '/cpu_utilization.csv'
-    # monitor_cpu_utilization_thread = threading.Thread(target=monitor_cpu_utilization, args=(server_processes, cpu_utilization_csv, 0.01, 5, monitor_stop_event,))
-    # monitor_cpu_utilization_thread.start()
+    if args.measure_cpu_utilization:
+        cpu_utilization_csv = log_dir + '/cpu_utilization.csv'
+        monitor_cpu_utilization_thread = threading.Thread(target=monitor_cpu_utilization, args=(server_processes, cpu_utilization_csv, 0.01, 5, monitor_stop_event,))
+        monitor_cpu_utilization_thread.start()
 
     if (not args.only_service):
         try:
@@ -386,11 +419,10 @@ if __name__ == "__main__":
             print(f"An unexpected exception occured while starting clients: {e}")
             terminateTest()
 
-    # if args.test_type == 'failure':
-        # manualKillServers()
-    if not graceful_failure:
-        kill_server_thread = threading.Thread(target=manualKillServers, args=(server_list[:2],8,))
-        kill_server_thread.start()
+    if args.test_type == 'failure':
+        if not graceful_failure:
+            kill_server_thread = threading.Thread(target=manualKillServers, args=(server_list[:2],8,))
+            kill_server_thread.start()
 
     # time.sleep(5)
     # startServer([10, 5450], 50000, log_dir, db_dir)
@@ -405,11 +437,14 @@ if __name__ == "__main__":
     print("Test finished. Terminating service")
     # wait for sometime to flush the stdout buffers to the log file
     time.sleep(2)
-    # monitor_stop_event.set()
-    # monitor_cpu_utilization_thread.join()
-    #kill_server_thread.join()
+
+    if args.measure_cpu_utilization:
+        monitor_stop_event.set()
+        monitor_cpu_utilization_thread.join()
+    
+    if args.test_type == 'failure':
+        kill_server_thread.join()
+    
     terminateService()
-    # for process in load_measurement_processes:
-    #    terminateProcess(process)
     
     print("Test End")

@@ -32,6 +32,8 @@ if __name__ == "__main__":
     parser.add_argument('--vk_ratio', type=int, default=0, help='ratio of value length to key length')
     parser.add_argument('--skew', action='store_true')
     parser.add_argument('--write-percentage', type=int, default=0, help='write percentage for performance tests')
+    
+    parser.add_argument('--populate-db', action='store_true')
 
     args = parser.parse_args()
 
@@ -58,26 +60,24 @@ if __name__ == "__main__":
     logging.warning(f"Client {client_id}: Started") 
     cl = HermesClient(server_list, client_id)
 
-    if (test_type == 'sanity'):
-        sanity.test(cl)
-    elif (test_type == 'correctness'):
-        db_keys = populate.populateDB(cl, num_keys)
-        correctness.correctnessTest(cl, db_keys)
-    elif (test_type == 'perf'):
-        keys = []
-        values = []
-        if (client_id == 0):
-            keys, values = performance_test.populateDB(cl, num_keys, args.vk_ratio)
-            logging.warning("Populate done!")
-        logging.warning("Starting perf tests")
-        performance_test.performanceTest(cl, num_keys, keys, values, write_per, args.skew, args.vk_ratio)
-        logging.warning("Client {client_id} ended perf tests")
-    elif (test_type == 'failure'):
-        keys = []
-        values = []
-        if (client_id == 0):
-            keys, values = performance_test.populateDB(cl, num_keys, args.vk_ratio)
-            logging.warning("Populate done!") 
-        logging.warning("Starting Failure Perf tests")
-        performance_test.performanceTest(cl, num_keys, keys, values, write_per, args.skew, args.vk_ratio, True)
-        logging.warning("Client {client_id} ended Failure Perf tests")
+    if args.populate_db:
+        performance_test.populateDB(cl, num_keys, args.vk_ratio)
+        logging.warning("Populate done!")
+    else:
+        if (test_type == 'sanity'):
+            sanity.test(cl)
+        elif (test_type == 'correctness'):
+            db_keys = populate.populateDB(cl, num_keys)
+            correctness.correctnessTest(cl, db_keys)
+        elif (test_type == 'perf'):
+            keys = []
+            values = []
+            logging.warning("Starting perf tests")
+            performance_test.performanceTest(cl, num_keys, keys, values, write_per, args.skew, args.vk_ratio)
+            logging.warning("Client {client_id} ended perf tests")
+        elif (test_type == 'failure'):
+            keys = []
+            values = []
+            logging.warning("Starting Failure Perf tests")
+            performance_test.performanceTest(cl, num_keys, keys, values, write_per, args.skew, args.vk_ratio, True)
+            logging.warning("Client {client_id} ended Failure Perf tests")

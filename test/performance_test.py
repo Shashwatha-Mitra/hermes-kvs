@@ -20,6 +20,13 @@ def getKeyNumber(skewFactor, num_keys_populated):
         return np.random.randint(freq_gp_size)
     return np.random.randint(freq_gp_size, num_keys_populated)
 
+def getKVPairs(num_keys):
+    length = math.ceil(math.log10(num_keys))
+    keys = [f"K{str(i).zfill(length)}" for i in range (num_keys)]
+    values = [f"VAL{str(i).zfill(length)}" for i in range (num_keys)]
+
+    return keys, values
+
 def populateDB(client, num_keys, vk_ratio = 0, failure=False):
     print("Populating DB..........")
     total_duration = 0
@@ -27,9 +34,7 @@ def populateDB(client, num_keys, vk_ratio = 0, failure=False):
     keys = []
     values = []
     if (vk_ratio == 0):
-        length = math.ceil(math.log10(num_keys))
-        keys = [f"K{str(i).zfill(length)}" for i in range (num_keys)]
-        values = [f"VAL{str(i).zfill(length)}" for i in range (num_keys)]
+        keys, values = getKVPairs(num_keys)
 
     for i in range(num_keys):
         key = ""
@@ -60,17 +65,17 @@ def populateDB(client, num_keys, vk_ratio = 0, failure=False):
     print (f"Num put() failures: {num_write_failures}")
     print (f"Total duration: {total_duration}")
     print ("Populating DB Completed.........")
-    return keys, values
     
 def performanceTest(client, num_keys=1000, keys=[], values=[], write_percentage = 10, skew = False, vk_ratio = 0, failure = False):
     print ("\nRunning Performance Tests...........\n")
     percentiles = [50, 70, 90, 99]
 
-    length = math.ceil(math.log10(num_keys))
-    if len(keys) == 0:
-        keys = [f"K{str(i).zfill(length)}" for i in range (num_keys)]
-    if len(values) == 0:
-        values = [f"VAL{str(i).zfill(length)}" for i in range (num_keys)]
+    #length = math.ceil(math.log10(num_keys))
+    #if len(keys) == 0:
+    #    keys = [f"K{str(i).zfill(length)}" for i in range (num_keys)]
+    #if len(values) == 0:
+    #    values = [f"VAL{str(i).zfill(length)}" for i in range (num_keys)]
+    keys, values = getKVPairs(num_keys)
 
     num_ops = 10*len(keys)
     num_keys_populated = len(keys)
