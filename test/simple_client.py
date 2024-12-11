@@ -17,7 +17,27 @@ def parseConfigFile(path_to_file):
             server_name = 'localhost:'+port_no
             server_list.append(server_name)
     return server_list
-        
+
+def getLogger(log_file): 
+    # create logger
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+
+    # create console handler and set level to debug
+    ch = logging.FileHandler(log_file, mode = 'w')
+    ch.setLevel(logging.DEBUG)
+
+    # create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # add formatter to ch
+    ch.setFormatter(formatter)
+
+    # add ch to logger
+    logger.addHandler(ch)
+
+    return logger
+
 
 if __name__ == "__main__":
 
@@ -30,7 +50,7 @@ if __name__ == "__main__":
     parser.add_argument('--log-dir', type=str, default='out/', help='path to log dir')
     parser.add_argument('--num-keys', type=int, default=10, help='number of gets to put and get in sanity test')
     parser.add_argument('--vk_ratio', type=int, default=0, help='ratio of value length to key length')
-    parser.add_argument('--skew', action='store_true')
+    parser.add_argument('--distribution', type=str, default='uniform_random', help='key distribution: uniform_random (default), linear, skew')
     parser.add_argument('--write-percentage', type=int, default=0, help='write percentage for performance tests')
     
     parser.add_argument('--populate-db', action='store_true')
@@ -51,18 +71,26 @@ if __name__ == "__main__":
     config_file = top_dir + args.config_file
     num_keys = args.num_keys
     write_per = args.write_percentage
+
+    stats_file = args.log_dir + '/' + 'stats.json'
+    log_file = args.log_dir + '/' + f'logger_client_{client_id}.log'
     # print (test_type + ' ' + args.config_file + ' ' + config_file)
    
     server_list = parseConfigFile(config_file)
     
-    logging.basicConfig(level = logging.WARN, format='%(asctime)s: %(message)s')
+    logger = getLogger(log_file)
+
+    #logging.basicConfig(filename=f'logger_client_{client_id}.log', encoding='utf-8', level=logging.DEBUG, format='%(asctime)s: %(message)s')
+    #logging.basicConfig(level = logging.WARN, format='%(asctime)s: %(message)s')
    
-    logging.warning(f"Client {client_id}: Started") 
-    cl = HermesClient(server_list, client_id)
+    logging.warning(f"client {client_id}: started")
+    logger.info(f"client {client_id}: started")
+    cl = HermesClient(server_list, client_id, logger)
 
     if args.populate_db:
         performance_test.populateDB(cl, num_keys, args.vk_ratio)
         logging.warning("Populate done!")
+        logger.info("Populate done!")
     else:
         if (test_type == 'sanity'):
             sanity.test(cl)
@@ -73,11 +101,15 @@ if __name__ == "__main__":
             keys = []
             values = []
             logging.warning("Starting perf tests")
-            performance_test.performanceTest(cl, num_keys, keys, values, write_per, args.skew, args.vk_ratio)
+            logger.info("Starting perf tests")
+            performance_test.performanceTest(cl, num_keys, stats_file, keys, values, write_per, args.distribution, args.vk_ratio)
             logging.warning("Client {client_id} ended perf tests")
+            logger.info("Client {client_id} ended perf tests")
         elif (test_type == 'failure'):
             keys = []
             values = []
             logging.warning("Starting Failure Perf tests")
-            performance_test.performanceTest(cl, num_keys, keys, values, write_per, args.skew, args.vk_ratio, True)
+            logger.info("Starting Failure Perf tests")
+            performance_test.performanceTest(cl, num_keys, stats_file, keys, values, write_per, args.distribution, args.vk_ratio, True)
             logging.warning("Client {client_id} ended Failure Perf tests")
+            logger.info("Client {client_id} ended Failure Perf tests")

@@ -124,7 +124,6 @@ def createService(protocol, config_file, master_port, log_dir='', db_dir='', sta
     elif protocol == 'cr':
         partitions = getPartitionConfig(config_file)
         servers = list(partitions.values())[0]
-        print(servers)
         if start_master:
             launch_master(config_file, master_port, log_dir, db_dir)
         time.sleep(3)
@@ -175,18 +174,16 @@ def getClientCmd(args, client_id, populate_db):
     cmd += ' ' + f'--config-file={args.config_file}'
     cmd += ' ' + f'--test-type={args.test_type}'
     cmd += ' ' + f'--top-dir={args.top_dir}'
-    cmd += ' ' + f'--log-dir={args.log_dir}'
+    cmd += ' ' + f'--log-dir={log_dir}'
     cmd += ' ' + f'--num-keys={args.num_keys}'
     cmd += ' ' + f'--write-percentage={args.write_percentage}'
+    cmd += ' ' + f'--distribution={args.distribution}'
 
     if populate_db:
         cmd += ' ' + f'--populate-db'
     
     if (args.vk_ratio != 0):  
         cmd += ' ' + f'--vk_ratio={args.vk_ratio}'
-
-    if (args.skew):
-        cmd += ' ' + f'--skew'
 
     return cmd
 
@@ -280,8 +277,8 @@ def startKiller(config_file, clean=1, strategy='random'):
 
 def manualKillServers(server_list, wait_time = 1):
     global server_processes
-    print (server_list)
     for server_id in server_list:
+        time.sleep(wait_time)
         assert(server_id in server_processes.keys())
         node = server_processes[server_id]
         print (f'Killing server {server_id}')
@@ -291,7 +288,6 @@ def manualKillServers(server_list, wait_time = 1):
             del server_processes[server_id]
         else:
             print ('Cannot remove a non-existing process')
-        time.sleep(wait_time)
 
 def monitor_cpu_utilization(processes, output_csv, sampling_rate=1, duration=30, stop_event=None):
     """
@@ -357,7 +353,7 @@ if __name__ == "__main__":
     parser.add_argument('--log-dir', type=str, default='out', help='path to log dir')
     parser.add_argument('--num-clients', type=int, default=1, help='number of clients')
     parser.add_argument('--master-port', type=str, default='60060', help='master port')
-    parser.add_argument('--skew', action='store_true')
+    parser.add_argument('--distribution', type=str, default='uniform_random', help='key distribution: uniform_random (default), linear, skew')
     parser.add_argument('--vk_ratio', type=int, default=0, help='ratio of value to key lenght')
     parser.add_argument('--num-keys', type=int, default=1000, help='number of gets to put and get in sanity test')
     parser.add_argument('--write-percentage', type=int, default=0, help='write percentage for performance tests')
@@ -421,7 +417,7 @@ if __name__ == "__main__":
 
     if args.test_type == 'failure':
         if not graceful_failure:
-            kill_server_thread = threading.Thread(target=manualKillServers, args=(server_list[:2],8,))
+            kill_server_thread = threading.Thread(target=manualKillServers, args=(['50050'],2,))
             kill_server_thread.start()
 
     # time.sleep(5)
