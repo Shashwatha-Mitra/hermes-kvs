@@ -18,7 +18,7 @@
 
 class WAL_writer {
 public:
-    WAL_writer(std::string &file_prefix, uint32_t partition);
+    WAL_writer(std::string &file_prefix, uint32_t partition, std::shared_ptr<spdlog::logger> &logger);
 
     // returns name of log file if it is has been completely written to
     std::string append(const std::string *key, const std::string *value);
@@ -37,26 +37,29 @@ private:
 
     uint64_t lsn;
 
-    std::string &file_prefix;
+    std::string file_prefix;
 
     int fd;
 
-    void open_log_file();
+    std::string open_log_file();
 
     uint32_t partition_num;
 
     std::mutex write_mutex;
+
+    std::shared_ptr<spdlog::logger> logger;
 };
 
 class StorageHelper {
 public:
-    StorageHelper(std::string &log_path, std::string &db_path, std::shared_ptr<spdlog::logger> &logger);
+    StorageHelper(std::string &log_path, std::string &db_path, std::shared_ptr<spdlog::logger> &logger,
+        uint32_t server_id);
 
     ~StorageHelper();
 
     void write_log(const std::string *key, const std::string *value);
 
-    static const uint32_t NUM_WRITERS = 16;
+    static const uint32_t NUM_WRITERS = 1;
 
 private:
     std::string db_path;

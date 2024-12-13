@@ -3,14 +3,15 @@
 #include <mutex>
 #include <condition_variable>
 #include <thread>
+#include <functional>
 
-class Task;
+using Task = std::function<void()>;
 
 class Threadpool {
 private:
     int _num_threads;
     std::vector<std::thread> _threads;
-    std::queue<Task*> _tasks; // queue of tasks not assigned to any thread
+    std::queue<Task> _tasks; // queue of tasks not assigned to any thread
     std::mutex _mutex;
     std::condition_variable _cv;
     bool _stop_requested;
@@ -25,7 +26,7 @@ public:
 
     ~Threadpool() {}
 
-    void addTask(Task *task) {}
+    void addTask(Task task) {}
     void processingLoop() {}
     void start() {}
     void stop() {}

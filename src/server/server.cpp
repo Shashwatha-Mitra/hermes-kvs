@@ -52,10 +52,9 @@ HermesServiceImpl::HermesServiceImpl(uint32_t id, std::string &log_dir,
         //_stubs.insert(create_stub(server));
     }
     std::string db_path = db_dir + "/db_" + std::to_string(server_id);
-    std::string log_prefix = log_dir + "/hermes_wal_" + std::to_string(server_id) + "_";
-    storage_helper = std::make_unique<StorageHelper>(log_dir, db_path, logger);
+    storage_helper = std::make_unique<StorageHelper>(log_dir, db_path, logger, server_id);
 
-    thread_pool = std::make_unique<ThreadPool>(4);
+    thread_pool = std::make_unique<ThreadPool>(1);
 
     dead.store(false);
 }
@@ -138,6 +137,7 @@ void HermesServiceImpl::performWrite(HermesValue *hermes_val) {
     std::atomic_bool persist_done {false};
     std::condition_variable persist_cv;
     std::mutex persist_mutex;
+    bool is_write_successful = false;
 
     while (true) {
         std::vector<uint32_t> current_active_servers;
@@ -187,6 +187,7 @@ void HermesServiceImpl::performWrite(HermesValue *hermes_val) {
             // }
             broadcast_validate(hermes_val->timestamp, key, current_active_servers, server_stubs);
             hermes_val->coord_write_to_valid_transition();
+            is_write_successful = true;
             break;
         }
         else {
