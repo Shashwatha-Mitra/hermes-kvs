@@ -35,13 +35,15 @@ def run_writes(client_id):
 def run_writes_same_key(key, client_id, num_writes):
     # global b1, b2
     mock_server_list = ['localhost:50052'] #if client_id == 1 else ['localhost:50050']
-    client = HermesClient(mock_server_list, id=client_id)
+    server_list = ['localhost:50050', 'localhost:50051', 'localhost:50052', 'localhost:50053', 'localhost:50054']
+    client = HermesClient(server_list, id=client_id)
     num_retries = 1
     retry_timeout = 10
     for i in range(num_writes):
         val = gen_random_value()
         # print(f"[{client_id}]: Putting value: {val}")
-        b1.wait()
+        # b1.wait()
+        # print(f"Write num: {i}")
         client.put(key, val, num_retries=num_retries, retry_timeout=retry_timeout)
         # print(f"[{client_id}]: Getting value: ")
         #b2.wait()
@@ -106,15 +108,15 @@ if __name__ == '__main__':
     logging.getLogger().setLevel(logging.DEBUG)
     # threads = [threading.Thread(group=None, target=run_writes, args=(i,)) for i in range(5)]
     key = gen_random_value()
-    num_writes = 1000
+    num_writes = 100
     num_reads = 100
     op_threads = []
-    for i in range(num_clients):
-        if i%2 == 0:
-            op_threads.append(threading.Thread(group=None, target=run_writes, args=(key, i, num_writes, ['localhost:50052'])))
-        else:
-            op_threads.append(threading.Thread(group=None, target=run_reads, args=(key, i, num_reads, ['localhost:50050'])))
-    #op_threads = [threading.Thread(group=None, target=run_writes_same_key, args=(key, i, num_writes,)) for i in range(num_clients)]
+    # for i in range(num_clients):
+    #     if i%2 == 0:
+    #         op_threads.append(threading.Thread(group=None, target=run_writes, args=(key, i, num_writes, ['localhost:50052'])))
+    #     else:
+    #         op_threads.append(threading.Thread(group=None, target=run_reads, args=(key, i, num_reads, ['localhost:50050'])))
+    op_threads = [threading.Thread(group=None, target=run_writes_same_key, args=(key, i, num_writes,)) for i in range(num_clients)]
     [t.start() for t in op_threads]
 
     #terminate_server_id = 2
