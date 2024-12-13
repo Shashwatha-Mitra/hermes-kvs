@@ -54,9 +54,9 @@ def run_writes_same_key(key, client_id, num_writes):
         #     print(f"[{client_id}]: Incorrect value returned")
         # print(f"[{client_id}]: Got value: {val_returned}")
 
-def run_writes(key, client_id, num_writes, server_list):
+def run_writes(key, client_id, num_writes, server_list, logger):
     # global b1, b2
-    client = HermesClient(server_list, id=client_id)
+    client = HermesClient(server_list, client_id, logger)
     #key = gen_random_value()
     num_retries = 10
     retry_timeout = 10
@@ -75,9 +75,9 @@ def run_writes(key, client_id, num_writes, server_list):
         #     print(f"[{client_id}]: Incorrect value returned")
         # print(f"[{client_id}]: Got value: {val_returned}")
 
-def run_reads(key, client_id, num_ops, server_list):
+def run_reads(key, client_id, num_ops, server_list, logger):
     # global b1, b2
-    client = HermesClient(server_list, id=client_id)
+    client = HermesClient(server_list, client_id, logger)
     #key = gen_random_value()
     num_retries = 1
     retry_timeout = 10
@@ -102,8 +102,33 @@ def terminate_server(client_id, server_id):
     time.sleep(50/1000) # sleep for in ms
     client.terminate(server_id)
 
+def getLogger(log_file): 
+    # create logger
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+
+    # create console handler and set level to debug
+    if log_file:
+        ch = logging.FileHandler(log_file, mode = 'w')
+    else:
+        ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+
+    # create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # add formatter to ch
+    ch.setFormatter(formatter)
+
+    # add ch to logger
+    logger.addHandler(ch)
+
+    return logger
+
 if __name__ == '__main__':
-    logging.getLogger().setLevel(logging.INFO)
+    #logging.getLogger().setLevel(logging.INFO)
+    log_file = None
+    logger = getLogger(log_file)
     # threads = [threading.Thread(group=None, target=run_writes, args=(i,)) for i in range(5)]
     key = gen_random_value()
     num_writes = 100
@@ -111,9 +136,9 @@ if __name__ == '__main__':
     op_threads = []
     for i in range(num_clients):
         if i%2 == 0:
-            op_threads.append(threading.Thread(group=None, target=run_writes, args=(key, i, num_writes, ['localhost:50052'])))
+            op_threads.append(threading.Thread(group=None, target=run_writes, args=(key, i, num_writes, ['localhost:50052'], logger)))
         else:
-            op_threads.append(threading.Thread(group=None, target=run_reads, args=(key, i, num_reads, ['localhost:50052'])))
+            op_threads.append(threading.Thread(group=None, target=run_reads, args=(key, i, num_reads, ['localhost:50052'], logger)))
     #op_threads = [threading.Thread(group=None, target=run_writes_same_key, args=(key, i, num_writes,)) for i in range(num_clients)]
     [t.start() for t in op_threads]
 
