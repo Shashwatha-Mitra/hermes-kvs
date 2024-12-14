@@ -48,17 +48,19 @@ def get_servers(config_file):
             servers.append(server)
     return servers
 
-def getServerCmd(log_dir, config_file, port):
+def getServerCmd(log_dir, config_file, port, db_dir):
     cmd = build_dir + 'server'
     cmd += ' ' + f'--id={port}'
     cmd += ' ' + f'--port={port}'
     cmd += ' ' + f'--log_dir={log_dir}'
     cmd += ' ' + f'--config_file={config_file}'
+    if db_dir is not None:
+        cmd += ' ' + f'--db_dir={db_dir}'
     
     return cmd
 
-def launch_server(server_port, log_dir='', config_file=''):
-    cmd = getServerCmd(log_dir, config_file, server_port)
+def launch_server(server_port, log_dir='', config_file='', db_dir=None):
+    cmd = getServerCmd(log_dir, config_file, server_port, db_dir)
     print(f"Starting server {server_port}")
     print(cmd)
     log_file = log_dir + f'server_{server_port}.log'
@@ -87,7 +89,7 @@ def launch_master(config_file, port, log_dir):
         process = subprocess.Popen(cmd, shell=True, stdout=f, stderr=f, preexec_fn=os.setsid)
         master_processes.append(process)
     
-def createService(config_file, master_port, log_dir='', start_master=True):
+def createService(config_file, master_port, log_dir='', start_master=True, db_dir='db'):
     #TODO: start the manager before creating chains
 
     #time.sleep(5)
@@ -95,7 +97,7 @@ def createService(config_file, master_port, log_dir='', start_master=True):
     #servers = servers[1:]
     print (log_dir)
     for server in servers:
-        launch_server(server, log_dir, config_file)
+        launch_server(server, log_dir, config_file, db_dir)
 
     if start_master:
         launch_master(config_file, master_port, log_dir)
@@ -269,12 +271,13 @@ if __name__ == "__main__":
     assert (not (args.only_clients and args.only_service))
 
     checkAndMakeDir(log_dir)
+    checkAndMakeDir(db_dir)
 
     graceful_failure = False
 
     if (not args.only_clients):
         try:
-            createService(config_file, args.master_port, log_dir=log_dir, start_master=(not graceful_failure))
+            createService(config_file, args.master_port, log_dir=log_dir, start_master=(not graceful_failure), db_dir=db_dir)
         except Exception as e:
             print(f"An unexpected exception occured while starting service: {e}")
             terminateTest()
@@ -292,8 +295,8 @@ if __name__ == "__main__":
 
     # if args.test_type == 'availability':
     #manualKillServers(0)
-    if not graceful_failure:
-        threading.Thread(target=manualKillServers, args=(2,6,)).start()
+    # if not graceful_failure:
+    #     threading.Thread(target=manualKillServers, args=(2,6,)).start()
 
     # time.sleep(5)
     # startServer([10, 5450], 50000, log_dir, db_dir)
