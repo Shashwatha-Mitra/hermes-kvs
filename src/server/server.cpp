@@ -366,7 +366,7 @@ std::pair<int, int> HermesServiceImpl::receive_acks(grpc::CompletionQueue &cq, s
                 // pending_acks.erase(responder);
                 acks_received++;
                 if (grpc_tag->response.accept()) {
-                    SPDLOG_LOGGER_TRACE(logger, "Invalidate accepted from {} for key {}", responder, key);
+                    SPDLOG_LOGGER_TRACE(logger, "Invalidate accepted by {} for key {}", responder, key);
                     acceptances_received++;
                 }
                 if (acks_received == num_servers) {
@@ -433,19 +433,33 @@ grpc::Status HermesServiceImpl::Invalidate(grpc::ServerContext *ctx, const Inval
     auto value = req->value();
     HermesValue* hermes_val {nullptr};
     bool new_key = false;
-    
-    if (key_value_map.find(req->key()) == key_value_map.end()) {
-        // Key not found. This corresponds to an insertion 
-        key_value_map[req->key()] = std::make_unique<HermesValue>(req->key(), req->value(), server_id);
+
+    std::pair<bool, map_iterator> is_present = isKeyPresent(req->key());
+    if (is_present.first) {
+        SPDLOG_LOGGER_DEBUG (logger, "[{}]::Invalidate::Key found!", get_tid());
+        hermes_val = is_present.second->second.get();
+    }
+    else {
+        SPDLOG_LOGGER_DEBUG (logger, "[{}]::Invalidate::Key not found!", get_tid());
+        hermes_val = writeNewKey(req->key(), value);
         new_key = true;
     }
+
     
-    hermes_val = key_value_map.find(req->key())->second.get();
+    // if (key_value_map.find(req->key()) == key_value_map.end()) {
+    //     // Key not found. This corresponds to an insertion 
+    //     SPDLOG_LOGGER_DEBUG(logger, "here");
+    //     key_value_map[req->key()] = std::make_unique<HermesValue>(req->key(), req->value(), server_id);
+    //     new_key = true;
+    // }
+    
+    // hermes_val = key_value_map.find(req->key())->second.get();
 
     // Reject any key that has lower timestamp
     if (!new_key && hermes_val->is_lower(ts)) {
         // Timestamp is lower than local timestamp. Reject
         resp->set_accept(false);
+        resp->set_responder(server_id);
         SPDLOG_LOGGER_DEBUG(logger, "Rejecting invalidate request because received timestamp {} is lower than local timestamp {}", Timestamp(ts).toString(), hermes_val->timestamp.toString());
         return grpc::Status::OK;
     }
