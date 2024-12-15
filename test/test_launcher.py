@@ -416,8 +416,9 @@ if __name__ == "__main__":
             terminateTest()
 
     if args.test_type == 'failure':
+        servers_to_kill = ['50050', '50051', '50052', '50053']
         if not graceful_failure:
-            kill_server_thread = threading.Thread(target=manualKillServers, args=(['50050'],2,))
+            kill_server_thread = threading.Thread(target=manualKillServers, args=(servers_to_kill,90,))
             kill_server_thread.start()
 
     # time.sleep(5)

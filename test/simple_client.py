@@ -25,7 +25,7 @@ def getLogger(log_file):
 
     # create console handler and set level to debug
     ch = logging.FileHandler(log_file, mode = 'w')
-    ch.setLevel(logging.DEBUG)
+    ch.setLevel(logging.INFO)
 
     # create formatter
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -72,7 +72,7 @@ if __name__ == "__main__":
     num_keys = args.num_keys
     write_per = args.write_percentage
 
-    stats_file = args.log_dir + '/' + 'stats.json'
+    stats_file = args.log_dir + '/' + f'stats_{client_id}.json'
     log_file = args.log_dir + '/' + f'logger_client_{client_id}.log'
     # print (test_type + ' ' + args.config_file + ' ' + config_file)
    

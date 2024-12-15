@@ -94,6 +94,8 @@ private:
     void performWriteReplay(HermesValue *hermes_val);
 
     std::pair<bool, map_iterator> isKeyPresent(std::string key);
+    
+    map_iterator getValueFromDB(std::string key);
 
     HermesValue* writeNewKey(std::string key, std::string value);
 

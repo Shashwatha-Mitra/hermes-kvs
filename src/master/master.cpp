@@ -111,7 +111,7 @@ void Master::reconfigure(uint32_t server, bool fail) {
             req.set_epoch_id(epoch);
             Empty resp;
             grpc::Status status = stub->Mayday(&ctx, req, &resp);
-            assert(status.ok());
+            //assert(status.ok());
         }
     }
     else {

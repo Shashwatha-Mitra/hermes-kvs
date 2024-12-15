@@ -7,7 +7,7 @@ import math
 import json
 
 max_key_length = 15
-time_interval = 1 # in seconds
+time_interval = 3 # in seconds
 def genRandomString (length):
     letters = string.ascii_lowercase
     return ''. join(random.choice(letters) for _ in range (length))
@@ -108,7 +108,7 @@ def performanceTest(client, num_keys, stats_file, keys=[], values=[], write_perc
     test_start_time = time.time_ns()
 
     for i in range (num_ops):
-        random_value = np.random.randint(100)
+        random_value = np.random.randint(0, high=100)
     
         if (distribution == "skew"):
             key_number = getKeyNumber(0.1, num_keys_populated)
@@ -131,7 +131,7 @@ def performanceTest(client, num_keys, stats_file, keys=[], values=[], write_perc
                 # Perform put operation on a random value generated on the fly
                 value = genRandomString (value_len)
                 start = time.time_ns()
-                client.put(key, value, failure)
+                client.put(key, value)
                 end = time.time_ns()
                 time_in_us = int((end - start)/1000)
                 write_times.append(time_in_us)
@@ -142,7 +142,7 @@ def performanceTest(client, num_keys, stats_file, keys=[], values=[], write_perc
             else:
                 # Get the value for key
                 start = time.time_ns()
-                value = client.get(key, failure)
+                value = client.get(key)
                 end = time.time_ns()
                 time_in_us = int((end - start)/1000)
                 op_times.append(time_in_us)
@@ -158,13 +158,15 @@ def performanceTest(client, num_keys, stats_file, keys=[], values=[], write_perc
             if (random_value < write_percentage):
                 num_write_failures += 1
                 write_failure_keys.append(key)
+                #op_start_times.append((start-test_start_time)/(1000*1000))
                 # print (f'Write Failure for key: {key}, value: {value}.\nException {e}\n')
-                total_reads += 1
+                total_writes += 1
             elif (value == ''):
                 num_read_failures += 1 
                 read_failure_keys.append(key)
+                #op_start_times.append((start-test_start_time)/(1000*1000))
                 # print (f'Read Failure for key: {key}.\nException {e}\n')
-                total_writes += 1
+                total_reads += 1
 
     expt_end = time.time_ns()
     expt_duration_in_us = (expt_end - expt_start)//1000
@@ -228,40 +230,31 @@ def performanceTest(client, num_keys, stats_file, keys=[], values=[], write_perc
     print (f'Write Failures: {write_failure_keys}\n')
 
     stats["throughput"] = round(throughput, 2)
-    stats["read"]["failure_keys"] = read_failure_keys
-    stats["write"]["failure_keys"] = write_failure_keys
+    #stats["read"]["failure_keys"] = read_failure_keys
+    #stats["write"]["failure_keys"] = write_failure_keys
 
 
     # Time series throughput
-    num_ops = 0
-    curr_time = 0
-    time_p = 0
     time_v_throughput = {
         "time": [],
         "throughput": []
     }
+    print(f"len(op_start_times): {len(op_start_times)}")
+    #assert(len(op_start_times) == num_ops)
     first_op_start_time = op_start_times[0]
     last_op_start_time = op_start_times[-1]
     bucket_size = time_interval * 1000 # bucket size in ms
-    time_range = np.arange(first_op_start_time, last_op_start_time + bucket_size, bucket_size).tolist()
-    throughput = [
+    time_range = np.arange(first_op_start_time, last_op_start_time + bucket_size, bucket_size)
+    throughput = np.array([
         sum(start <= t < start+bucket_size for t in op_start_times)
         for start in time_range
-    ]
-    #for t in op_times:
-    #    curr_time += t
-    #    num_ops += 1
-    #    if (curr_time > (time_interval * 1000 * 1000)):
-    #        throughput = (num_ops * 1000 * 1000)/(curr_time)
-    #        time_p += curr_time
-    #        time_v_throughput[0].append(round(time_p/1000, 2))
-    #        time_v_throughput[1].append(round(throughput, 2))
-    #        print (f'{round(time_p/1000,2)} {round(throughput, 2)}')
-    #        curr_time = 0
-    #        num_ops = 0
-    # print (time_v_throughput)
-    time_v_throughput["time"] = time_range
-    time_v_throughput["throughput"] = throughput
+    ])
+    
+    time_range = (time_range / float(1000)).astype(int) # convert to seconds
+    throughput = throughput / float(time_interval)  # convert to ops/second
+    
+    time_v_throughput["time"] = time_range.tolist()
+    time_v_throughput["throughput"] = throughput.tolist()
     stats["time_v_throughput"] = time_v_throughput
 
     print ("\nEnding Performance Tests.................")
